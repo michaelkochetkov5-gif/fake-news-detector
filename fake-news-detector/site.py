@@ -28,11 +28,10 @@ def save_cache(cache):
 # ===== ЗАГРУЗКА МОДЕЛИ =====
 @st.cache_resource
 def load_model():
-    model = joblib.load('russian_fake_news_model_lemma_best.pkl')
-    vectorizer = joblib.load('russian_fake_news_vectorizer_lemma.pkl')
+    model = joblib.load('fake-news-detector/russian_fake_news_model_lemma_best.pkl')
+    vectorizer = joblib.load('fake-news-detector/russian_fake_news_vectorizer_lemma.pkl')
     return model, vectorizer
-import os
-st.write("Файлы в папке:", sorted(os.listdir('.')))
+
 model, vectorizer = load_model()
 morph = MorphAnalyzer()
 
