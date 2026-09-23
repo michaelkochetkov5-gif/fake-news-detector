@@ -28,8 +28,8 @@ def save_cache(cache):
 # ===== ЗАГРУЗКА МОДЕЛИ =====
 @st.cache_resource
 def load_model():
-    model = joblib.load('D:/russian_fake_news_model_lemma_best.pkl')
-    vectorizer = joblib.load('D:/russian_fake_news_vectorizer_lemma.pkl')
+    model = joblib.load('russian_fake_news_model_lemma_best.pkl')
+    vectorizer = joblib.load('russian_fake_news_vectorizer_lemma.pkl')
     return model, vectorizer
 
 model, vectorizer = load_model()
