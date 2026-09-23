@@ -16,10 +16,11 @@ fact_checker = FactChecker()
 CACHE_FILE = "cache.json"
 
 def load_cache():
-    if Path(CACHE_FILE).exists():
-        with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+    try:
+        with open('имя_файла.json', 'r', encoding='utf-8') as f:
             return json.load(f)
-    return {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
 
 def save_cache(cache):
     with open(CACHE_FILE, 'w', encoding='utf-8') as f:
