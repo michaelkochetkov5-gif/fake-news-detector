@@ -3,7 +3,7 @@ import joblib
 import re
 import pandas as pd
 from pymorphy3 import MorphAnalyzer
-from fact_checker import FactChecker
+from main_code import FactChecker
 from scipy.special import expit
 from datetime import datetime
 import json
