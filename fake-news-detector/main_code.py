@@ -251,7 +251,7 @@ class FactChecker:
         except Exception as e:
             return None, f"Ошибка RSS: {e}", []
     
-    def search_duckduckgo(self, query):
+def search_duckduckgo(self, query):
     try:
         with DDGS() as ddgs:
             results = ddgs.text(query, max_results=10)
