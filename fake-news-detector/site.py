@@ -23,8 +23,8 @@ def load_cache():
         return {}
 
 def save_cache(cache):
-    with open(CACHE_FILE, 'w', encoding='utf-8') as f:
-        json.dump(cache, f, ensure_ascii=False, indent=2)
+    with open('имя_файла.json', 'w', encoding='utf-8') as f:
+        json.dump(cache, f, ensure_ascii=False, indent=2, default=str)
 
 # ===== ЗАГРУЗКА МОДЕЛИ =====
 @st.cache_resource
