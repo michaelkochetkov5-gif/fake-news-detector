@@ -176,7 +176,10 @@ class FactChecker:
             'organizations': []
         }
         
-        pattern1 = r'([А-Я][а-я]+)\s+(президент|министр|глава|канцлер|директор)\s+([А-Я][а-я]+)'
+        pattern1 = r'([А-Яа-яЁё]+)\s+(президент|министр|глава|канцлер|директор)\s+([А-Яа-яЁё]+)'
+        text_norm = text.strip()
+        text_norm = text_norm[0].upper() + text_norm[1:] if text_norm else text_norm
+        matches1 = re.findall(pattern1, text_norm, re.IGNORECASE)
         matches1 = re.findall(pattern1, text, re.IGNORECASE)
         for match in matches1:
             entities['persons'].append(match[0])
@@ -249,33 +252,31 @@ class FactChecker:
             return None, f"Ошибка RSS: {e}", []
     
     def search_duckduckgo(self, query):
-        try:
-            with DDGS() as ddgs:
-                results = ddgs.text(query, max_results=10)
-                
-                if not results:
-                    return None, "Ничего не найдено"
-                
-                query_words = query.lower().split()
-                positive_count = 0
-                
-                for r in results:
-                    title = r['title'].lower()
-                    body = r['body'].lower()
-                    combined = title + " " + body
-                    
-                    if all(word in combined for word in query_words):
-                        positive_count += 1
-                
-                if positive_count >= 3:
-                    return True, f"✓ Подтверждено в {positive_count} источниках"
-                elif positive_count >= 1:
-                    return None, f"? Найдено {positive_count} источника"
-                else:
-                    return False, "✗ Не найдено подтверждений"
-                    
-        except Exception as e:
-            return None, f"Ошибка поиска: {e}"
+    try:
+        with DDGS() as ddgs:
+            results = ddgs.text(query, max_results=10)
+
+            if not results:
+                return None, "Ничего не найдено"
+
+            query_words = query.lower().split()
+            matches = 0
+
+            for r in results:
+                combined = (r['title'] + " " + r['body']).lower()
+                if all(word in combined for word in query_words):
+                    matches += 1
+
+            if matches >= 3:
+                # Совпадение слов ещё НЕ доказывает утверждение
+                return None, f"? Найдено {matches} упоминаний, но требуется проверка смысла"
+            elif matches >= 1:
+                return None, f"? Найдено {matches} упоминание, требуется проверка смысла"
+            else:
+                return False, "✗ Не найдено даже упоминаний темы"
+
+    except Exception as e:
+        return None, f"Ошибка поиска: {e}"
     
     def check_wikipedia(self, person=None, position=None, country=None, organization=None, query=None):
         try:
