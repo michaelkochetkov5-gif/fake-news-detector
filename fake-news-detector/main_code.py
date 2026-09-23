@@ -464,7 +464,6 @@ def search_duckduckgo(self, query):
             'details': results,
             'theme': theme
         }
-
 if __name__ == "__main__":
     checker = FactChecker()
     
