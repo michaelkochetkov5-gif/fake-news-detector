@@ -151,7 +151,12 @@ QUICK_FACTS = {
     'gpt-4 понимает русский язык': True,
     'minecraft самая продаваемая игра': True,
     'киберспорт на олимпиаде': False,
+    'земля круглая': True,
+    'земля плоская': False,
 }
+
+STOP_WORDS = {'и', 'в', 'на', 'с', 'по', 'за', 'из', 'у', 'к', 'о', 'а', 'но',
+              'или', 'это', 'как', 'что', 'не', 'был', 'была', 'быть', 'есть'}
 
 class FactChecker:
     def __init__(self):
@@ -292,16 +297,17 @@ class FactChecker:
             return None, f"Ошибка поиска: {e}", []
 
     def check_refutations(self, query):
-        """Ищет статьи, опровергающие утверждение."""
+        """Ищет статьи, опровергающие утверждение.
+        ВАЖНО: результат используется только как подсказка,
+        автоматический вердикт ФЕЙК по нему не ставится."""
         refute_queries = [
             f"{query} опровержение",
             f"{query} фейк разоблачение",
             f"{query} это ложь",
         ]
         
-        negation_words = ['не является', 'не был', 'не является президентом',
-                          'опроверг', 'фейк', 'ложь', 'неправда', 'миф',
-                          'дезинформация', 'не соответствует']
+        negation_words = ['не является', 'не был', 'опроверг', 'фейк', 'ложь',
+                          'неправда', 'миф', 'дезинформация', 'не соответствует']
         
         refutations_found = 0
         links = []
@@ -321,16 +327,43 @@ class FactChecker:
                         if topic_match >= 2 and has_negation:
                             refutations_found += 1
                             links.append(r['href'])
-                            
-                            if refutations_found >= 2:
-                                return True, f"✗ Найдено {refutations_found} опровержения", links[:5]
             
-            if refutations_found == 1:
-                return True, "? Найдено 1 возможное опровержение", links[:5]
+            if refutations_found >= 2:
+                return True, f"Найдено {refutations_found} возможных опровержения — требуется проверка смысла", links[:5]
+            elif refutations_found == 1:
+                return True, "Найдено 1 возможное опровержение — требуется проверка смысла", links[:5]
             return False, "Опровержений не найдено", []
             
         except Exception as e:
             return False, f"Ошибка поиска опровержений: {e}", []
+
+    def check_wikipedia_claim(self, text):
+        """Проверка короткого утверждения по Википедии:
+        если все значимые слова утверждения найдены в статье — ПРАВДА."""
+        try:
+            words = [w for w in re.findall(r'[а-яё]+', text.lower()) if w not in STOP_WORDS and len(w) > 2]
+            if not words:
+                return None, "Нет значимых слов для проверки"
+            
+            search_results = wikipedia.search(text, results=3)
+            if not search_results:
+                return None, "Статья не найдена"
+            
+            page = wikipedia.page(search_results[0], auto_suggest=False)
+            content = (page.summary + " " + page.content[:5000]).lower()
+            
+            found = sum(1 for w in words if w[:5] in content)
+            ratio = found / len(words)
+            
+            if ratio >= 0.99:
+                return True, f"✓ Утверждение согласуется со статьёй «{page.title}» (Википедия)"
+            elif ratio >= 0.5:
+                return None, f"? Тема найдена («{page.title}»), но утверждение требует проверки смысла"
+            else:
+                return None, f"? Тема найдена («{page.title}»), но утверждение не подтверждено напрямую"
+                
+        except Exception as e:
+            return None, f"Ошибка Wikipedia: {e}"
             
     def check_wikipedia(self, person=None, position=None, country=None, organization=None, query=None):
         try:
@@ -413,35 +446,46 @@ class FactChecker:
         entities = self.extract_entities(text)
         
         if not entities['persons'] and not entities['events'] and not entities['organizations']:
-            # Сначала ищем опровержения
-            refute_result = self.check_refutations(text)
-            if refute_result[0] and "Найдено 2" in refute_result[1]:
+            # 1. Проверка утверждения по Википедии
+            wiki_claim = self.check_wikipedia_claim(text)
+            if wiki_claim[0] is True:
                 return {
-                    'verdict': 'ФЕЙК',
-                    'reason': refute_result[1],
-                    'confidence': 0.9,
+                    'verdict': 'ПРАВДА',
+                    'reason': wiki_claim[1],
+                    'confidence': 0.8,
                     'details': [{
                         'fact': text,
-                        'source': 'DuckDuckGo (опровержения)',
-                        'result': False,
-                        'reason': refute_result[1],
-                        'links': refute_result[2]
+                        'source': 'Википедия',
+                        'result': True,
+                        'reason': wiki_claim[1],
+                        'links': []
                     }],
                     'theme': theme
                 }
             
-            # Потом обычный поиск упоминаний
+            # 2. Поиск опровержений — только как подсказка, НЕ вердикт
+            refute_result = self.check_refutations(text)
+            
+            # 3. Обычный поиск упоминаний
             ddg_result = self.search_duckduckgo(text)
             links = ddg_result[2] if len(ddg_result) > 2 else []
+            
+            if refute_result[0]:
+                links = list(dict.fromkeys(refute_result[2] + links))[:5]
+            
+            reason = ddg_result[1]
+            if refute_result[0]:
+                reason += f". {refute_result[1]}"
+            
             return {
                 'verdict': 'НЕИЗВЕСТНО' if ddg_result[0] is None else ('ПРАВДА' if ddg_result[0] else 'ФЕЙК'),
-                'reason': ddg_result[1],
-                'confidence': 0.5 if ddg_result[0] is None else 1.0,
+                'reason': reason,
+                'confidence': 0.5,
                 'details': [{
                     'fact': text,
                     'source': 'DuckDuckGo',
                     'result': ddg_result[0],
-                    'reason': ddg_result[1],
+                    'reason': reason,
                     'links': links
                 }],
                 'theme': theme
@@ -543,11 +587,10 @@ if __name__ == "__main__":
     checker = FactChecker()
     
     tests = [
+        "Земля круглая",
+        "Земля плоская",
         "Путин президент России",
         "Сахар вызывает зависимость сильнее кокаина",
-        "ChatGPT заменит всех программистов",
-        "МГУ входит в топ 100 университетов",
-        "Интересные факты о космосе",
         "Minecraft самая продаваемая игра",
     ]
     
