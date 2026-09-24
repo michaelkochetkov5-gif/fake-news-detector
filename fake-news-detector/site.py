@@ -17,13 +17,13 @@ CACHE_FILE = "cache.json"
 
 def load_cache():
     try:
-        with open('имя_файла.json', 'r', encoding='utf-8') as f:
+        with open(CACHE_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
 def save_cache(cache):
-    with open('имя_файла.json', 'w', encoding='utf-8') as f:
+    with open(CACHE_FILE, 'w', encoding='utf-8') as f:
         json.dump(cache, f, ensure_ascii=False, indent=2, default=str)
 
 # ===== ЗАГРУЗКА МОДЕЛИ =====
@@ -104,7 +104,7 @@ with st.sidebar:
     st.header("📊 О системе")
     st.info("""
     - **Модель**: Linear SVM (95.48%)
-    - **Фактчекинг**: Wikipedia + DuckDuckGo + RSS (20+ сайтов)
+    - **Фактчекинг**: Wikipedia + DuckDuckGo + RSS (40+ сайтов)
     - **Темы**: Еда, Учёба, ИИ, Наука, IT, Игры, Кино, Музыка, Спорт, Путешествия, Факты
     - **Язык**: Русский
     """)
@@ -163,6 +163,13 @@ st.write("**Введите текст для проверки:**")
 
 user_input = st.text_area("Текст", height=200, placeholder="Введите текст новости, факта или утверждения...")
 
+# Выбор темы новости
+theme_choice = st.selectbox(
+    "Тема новости (необязательно — если не уверены, оставьте «авто»):",
+    ['авто', 'общее', 'еда', 'учёба', 'ии', 'it', 'наука',
+     'игры', 'кино', 'музыка', 'спорт', 'путешествия', 'факты']
+)
+
 # Кнопки
 col1, col2, col3 = st.columns([1, 1, 1])
 with col1:
@@ -202,20 +209,22 @@ if check_button or 'example' in st.session_state:
     else:
         # Проверяем кэш
         cache = load_cache()
-        if text_to_check in cache:
+        cache_key = f"{text_to_check}||{theme_choice}"
+        
+        if cache_key in cache:
             st.info("ℹ️ Результат загружен из кэша")
-            prediction, confidence, lemmatized, fact_result = cache[text_to_check]
+            prediction, confidence, lemmatized, fact_result = cache[cache_key]
         else:
             # 1. Стилевая проверка
             with st.spinner("🔄 Анализ текста..."):
                 prediction, confidence, lemmatized = predict_fake(text_to_check)
             
-            # 2. Фактчекинг
+            # 2. Фактчекинг (с выбранной темой или авто)
             with st.spinner("🌐 Проверка фактов..."):
-                fact_result = fact_checker.verify(text_to_check)
+                fact_result = fact_checker.verify(text_to_check, theme=theme_choice)
             
             # Сохраняем в кэш
-            cache[text_to_check] = (prediction, confidence, lemmatized, fact_result)
+            cache[cache_key] = (prediction, confidence, lemmatized, fact_result)
             save_cache(cache)
         
         # Сохраняем в session state
@@ -384,7 +393,7 @@ st.markdown("""
 <div style='text-align: center; color: gray;'>
     <small>
     🔍 Детектор Фейковых Новостей + Фактчекинг | Модель: Linear SVM (95.48% accuracy)<br>
-    Фактчекинг: Wikipedia + DuckDuckGo + RSS (20+ сайтов)
+    Фактчекинг: Wikipedia + DuckDuckGo + RSS (40+ сайтов)
     </small>
 </div>
 """, unsafe_allow_html=True)
