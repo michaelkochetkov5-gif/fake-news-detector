@@ -215,9 +215,17 @@ if check_button or 'example' in st.session_state:
             st.info("ℹ️ Результат загружен из кэша")
             prediction, confidence, lemmatized, fact_result = cache[cache_key]
         else:
-            # 1. Стилевая проверка
-            with st.spinner("🔄 Анализ текста..."):
-                prediction, confidence, lemmatized = predict_fake(text_to_check)
+            # 1. Стилевая проверка — только для достаточно длинных текстов
+            word_count = len(text_to_check.split())
+            
+            if word_count < 8:
+                # Короткое утверждение: стилевая модель ненадёжна — не применяем
+                prediction = None
+                confidence = 0.0
+                lemmatized = lemmatize_text(clean_text(text_to_check))
+            else:
+                with st.spinner("🔄 Анализ текста..."):
+                    prediction, confidence, lemmatized = predict_fake(text_to_check)
             
             # 2. Фактчекинг (с выбранной темой или авто)
             with st.spinner("🌐 Проверка фактов..."):
@@ -237,7 +245,7 @@ if check_button or 'example' in st.session_state:
         st.session_state.stats['total'] += 1
         if prediction == 0:
             st.session_state.stats['fake_style'] += 1
-        else:
+        elif prediction == 1:
             st.session_state.stats['truth_style'] += 1
         
         if fact_result['verdict'] == 'ФЕЙК':
@@ -285,7 +293,10 @@ if check_button or 'example' in st.session_state:
         with col2:
             st.metric("Слов после лемматизации", f"{len(lemmatized.split())}")
         with col3:
-            st.metric("Уверенность модели", f"{confidence:.1f}%")
+            if prediction is None:
+                st.metric("Уверенность модели", "—")
+            else:
+                st.metric("Уверенность модели", f"{confidence:.1f}%")
         
         # Вердикт
         st.markdown("---")
@@ -304,7 +315,9 @@ if check_button or 'example' in st.session_state:
         
         with col_style:
             st.markdown("### 📈 Стилевая модель")
-            if prediction == 0:
+            if prediction is None:
+                st.info("➖ Не применялась (короткое утверждение — решение по фактам)")
+            elif prediction == 0:
                 st.error(f"❌ ФЕЙК ({confidence:.1f}%)")
             else:
                 st.success(f"✅ ПРАВДА ({confidence:.1f}%)")
@@ -316,15 +329,12 @@ if check_button or 'example' in st.session_state:
         if fact_result['verdict'] == 'ФЕЙК':
             st.error("❌ **ФЕЙКОВАЯ НОВОСТЬ** (не соответствует фактам)")
             st.write(f"**Причина:** {fact_result['reason']}")
-        elif fact_result['verdict'] == 'ПРАВДА' and prediction == 1:
-            st.success("✅ **ПРАВДИВАЯ НОВОСТЬ** (подтверждено фактами и стилем)")
+        elif fact_result['verdict'] == 'ПРАВДА':
+            st.success("✅ **ПРАВДИВАЯ НОВОСТЬ** (подтверждено фактами)")
             st.write(f"**Причина:** {fact_result['reason']}")
-        elif fact_result['verdict'] == 'ПРАВДА' and prediction == 0:
-            st.warning("⚠️ **ВОЗМОЖНО ФЕЙК** (факты верны, но стиль подозрительный)")
-            st.write("**Признаки фейка:**")
-            st.write("- Эмоциональные слова (шок, сенсация)")
-            st.write("- Отсутствие конкретных фактов")
-            st.write("- Призывы к эмоциям")
+        elif prediction is None:
+            st.warning("⚠️ **НЕ УДАЛОСЬ НАДЁЖНО ПРОВЕРИТЬ** (короткое утверждение)")
+            st.write(f"**Причина:** {fact_result['reason']}")
         elif fact_result['verdict'] == 'НЕИЗВЕСТНО' and prediction == 0:
             st.error("❌ **Вероятно ФЕЙК** (стилевая модель)")
             st.write(f"**Уверенность:** {confidence:.1f}%")
