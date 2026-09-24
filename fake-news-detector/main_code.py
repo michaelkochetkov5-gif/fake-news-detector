@@ -277,7 +277,49 @@ class FactChecker:
 
         except Exception as e:
             return None, f"Ошибка поиска: {e}"
-    
+
+    def check_refutations(self, query):
+        """Ищет статьи, опровергающие утверждение."""
+        refute_queries = [
+            f"{query} опровержение",
+            f"{query} фейк разоблачение",
+            f"{query} это ложь",
+        ]
+        
+        negation_words = ['не является', 'не был', 'не является президентом',
+                          'опроверг', 'фейк', 'ложь', 'неправда', 'миф',
+                          'дезинформация', 'не соответствует']
+        
+        refutations_found = 0
+        links = []
+        
+        try:
+            with DDGS() as ddgs:
+                for rq in refute_queries:
+                    results = ddgs.text(rq, max_results=5)
+                    query_words = query.lower().split()
+                    
+                    for r in results:
+                        combined = (r['title'] + " " + r['body']).lower()
+                        
+                        # Статья должна упоминать тему И содержать отрицание
+                        topic_match = sum(1 for w in query_words if w in combined)
+                        has_negation = any(nw in combined for nw in negation_words)
+                        
+                        if topic_match >= 2 and has_negation:
+                            refutations_found += 1
+                            links.append(r['href'])
+                            
+                            if refutations_found >= 2:
+                                return True, f"✗ Найдено {refutations_found} опровержения", links[:5]
+            
+            if refutations_found == 1:
+                return True, "? Найдено 1 возможное опровержение", links[:5]
+            return False, "Опровержений не найдено", []
+            
+        except Exception as e:
+            return False, f"Ошибка поиска опровержений: {e}", []
+            
     def check_wikipedia(self, person=None, position=None, country=None, organization=None, query=None):
         try:
             search_query = person or organization or query
@@ -356,7 +398,25 @@ class FactChecker:
         
         entities = self.extract_entities(text)
         
-        if not entities['persons'] and not entities['events'] and not entities['organizations']:
+                if not entities['persons'] and not entities['events'] and not entities['organizations']:
+            # Сначала ищем опровержения
+            refute_result = self.check_refutations(text)
+            if refute_result[0] and "Найдено 2" in refute_result[1]:
+                return {
+                    'verdict': 'ФЕЙК',
+                    'reason': refute_result[1],
+                    'confidence': 0.9,
+                    'details': [{
+                        'fact': text,
+                        'source': 'DuckDuckGo (опровержения)',
+                        'result': False,
+                        'reason': refute_result[1],
+                        'links': refute_result[2]
+                    }],
+                    'theme': theme
+                }
+            
+            # Потом обычный поиск подтверждений
             ddg_result = self.search_duckduckgo(text)
             links = [r['href'] for r in ddg_result[2]] if len(ddg_result) > 2 and ddg_result[2] else []
             return {
