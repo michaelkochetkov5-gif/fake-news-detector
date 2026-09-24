@@ -5,52 +5,66 @@ import feedparser
 
 # ===== RSS ЛЕНТЫ =====
 RSS_FEEDS = {
-    # Новости (общее)
     'lenta': 'https://lenta.ru/rss/news',
     'ria': 'https://ria.ru/export/rss2/news/index.xml',
     'tass': 'https://tass.ru/rss/v2.xml',
     'meduza': 'https://meduza.io/rss/all',
-    
-    # Еда
+    'kommersant': 'https://www.kommersant.ru/RSS/news.xml',
+    'rbc': 'https://www.rbc.ru/rss/news.rss',
+    'vedomosti': 'https://www.vedomosti.ru/rss/news',
+    'interfax': 'https://www.interfax.ru/rss.asp',
+    'gazeta': 'https://www.gazeta.ru/export/rss/lenta.xml',
+    'izvestia': 'https://iz.ru/rss',
+    'rg': 'https://rg.ru/rss.xml',
+    'aif': 'https://aif.ru/rss/all',
+    'mk': 'https://www.mk.ru/rss/news/index.xml',
+    'kp': 'https://www.kp.ru/rss/all.xml',
+
     'eda_ru': 'https://eda.ru/rss',
     'povarenok': 'https://www.povarenok.ru/rss/',
-    
-    # Учёба
+    'gastronom': 'https://www.gastronom.ru/xml/rss.xml',
+
     'postupi_online': 'https://postupi.online/news/rss/',
-    
-    # ИИ и технологии
+    'hse': 'https://www.hse.ru/news/rss/',
+    'mel': 'https://mel.fm/rss',
+
     'habr': 'https://habr.com/ru/rss/',
     'vc_ru': 'https://vc.ru/rss',
     'tproger': 'https://tproger.ru/feed/',
-    
-    # Наука
+    'xakep': 'https://xakep.ru/feed/',
+    'opennet': 'https://www.opennet.ru/opennews/opennews_all.rss',
+
     'nplus1': 'https://nplus1.ru/rss',
     'elementy': 'https://elementy.ru/rss',
     'indicator': 'https://indicator.ru/rss.xml',
     'scientificrussia': 'https://scientificrussia.ru/feed',
-    
-    # Игры
+    'naked-science': 'https://naked-science.ru/rss',
+    'popmech': 'https://www.popmech.ru/rss/all.xml',
+
     'dtf': 'https://dtf.ru/rss',
-    'kanobu': 'https://www.kanobu.ru/rss/',
+    'kanobu': 'https://kanobu.ru/rss/',
     'igromania': 'https://www.igromania.ru/rss/',
-    
-    # Спорт
+    'stopgame': 'https://stopgame.ru/rss/data.rss',
+    'cybersport': 'https://www.cybersport.ru/rss/news.rss',
+
     'sports': 'https://www.sports.ru/rss/',
     'matchtv': 'https://matchtv.ru/rss',
-    
-    # Интересные факты
+    'championat': 'https://www.championat.com/rss/news.xml',
+    'sovsport': 'https://www.sovsport.ru/rss/all.xml',
+
+    'vokrugsveta': 'https://www.vokrugsveta.ru/rss/',
+    'natgeo': 'https://www.national-geographic.ru/rss/',
+    'tonkosti': 'https://tonkosti.ru/rss',
+    'tourister': 'https://www.tourister.ru/rss/news',
+
+    'kinopoisk': 'https://www.kinopoisk.ru/rss/news/',
+    'film_ru': 'https://www.film.ru/rss/',
+    'afisha': 'https://www.afisha.ru/rss/news/',
+
     'factroom': 'https://factroom.ru/feed',
     'fishki': 'https://fishki.net/rss',
     'adme': 'https://www.adme.ru/rss/',
     'lifehacker': 'https://lifehacker.ru/feed/',
-    
-    # Вокруг света
-    'vokrugsveta': 'https://www.vokrugsveta.ru/rss/',
-    'natgeo': 'https://www.national-geographic.ru/rss/',
-    
-    # Кино
-    'kinopoisk': 'https://www.kinopoisk.ru/rss/news/',
-    'film_ru': 'https://www.film.ru/rss/',
 }
 
 # ===== КЛЮЧЕВЫЕ СЛОВА ДЛЯ ТЕМ =====
@@ -169,11 +183,8 @@ class FactChecker:
     
     def extract_entities(self, text):
         entities = {
-            'persons': [],
-            'positions': [],
-            'countries': [],
-            'events': [],
-            'organizations': []
+            'persons': [], 'positions': [], 'countries': [],
+            'events': [], 'organizations': []
         }
         
         text_norm = text.strip()
@@ -202,23 +213,23 @@ class FactChecker:
     
     def get_rss_for_theme(self, theme):
         if theme == 'еда':
-            return {k: v for k, v in RSS_FEEDS.items() if k in ['eda_ru', 'povarenok']}
+            return {k: v for k, v in RSS_FEEDS.items() if k in ['eda_ru', 'povarenok', 'gastronom']}
         elif theme == 'учёба':
-            return {k: v for k, v in RSS_FEEDS.items() if k in ['postupi_online']}
+            return {k: v for k, v in RSS_FEEDS.items() if k in ['postupi_online', 'hse', 'mel']}
         elif theme == 'ии' or theme == 'it':
-            return {k: v for k, v in RSS_FEEDS.items() if k in ['habr', 'vc_ru', 'tproger']}
+            return {k: v for k, v in RSS_FEEDS.items() if k in ['habr', 'vc_ru', 'tproger', 'xakep', 'opennet']}
         elif theme == 'наука':
-            return {k: v for k, v in RSS_FEEDS.items() if k in ['nplus1', 'elementy', 'indicator', 'scientificrussia']}
+            return {k: v for k, v in RSS_FEEDS.items() if k in ['nplus1', 'elementy', 'indicator', 'scientificrussia', 'naked-science', 'popmech']}
         elif theme == 'игры':
-            return {k: v for k, v in RSS_FEEDS.items() if k in ['dtf', 'kanobu', 'igromania']}
+            return {k: v for k, v in RSS_FEEDS.items() if k in ['dtf', 'kanobu', 'igromania', 'stopgame', 'cybersport']}
         elif theme == 'спорт':
-            return {k: v for k, v in RSS_FEEDS.items() if k in ['sports', 'matchtv']}
+            return {k: v for k, v in RSS_FEEDS.items() if k in ['sports', 'matchtv', 'championat', 'sovsport']}
+        elif theme == 'путешествия':
+            return {k: v for k, v in RSS_FEEDS.items() if k in ['vokrugsveta', 'natgeo', 'tonkosti', 'tourister']}
+        elif theme == 'кино':
+            return {k: v for k, v in RSS_FEEDS.items() if k in ['kinopoisk', 'film_ru', 'afisha']}
         elif theme == 'факты':
             return {k: v for k, v in RSS_FEEDS.items() if k in ['factroom', 'fishki', 'adme', 'lifehacker']}
-        elif theme == 'путешествия':
-            return {k: v for k, v in RSS_FEEDS.items() if k in ['vokrugsveta', 'natgeo']}
-        elif theme == 'кино':
-            return {k: v for k, v in RSS_FEEDS.items() if k in ['kinopoisk', 'film_ru']}
         else:
             return RSS_FEEDS
     
@@ -245,7 +256,7 @@ class FactChecker:
             if len(all_matches) >= 2:
                 return True, f"✓ Найдено в {len(all_matches)} источниках", all_matches[:5]
             elif len(all_matches) == 1:
-                return None, f"? Найдено в 1 источнике", all_matches
+                return None, "? Найдено в 1 источнике", all_matches
             else:
                 return False, "✗ Новостей не найдено", []
                 
@@ -304,7 +315,6 @@ class FactChecker:
                     for r in results:
                         combined = (r['title'] + " " + r['body']).lower()
                         
-                        # Статья должна упоминать тему И содержать отрицание
                         topic_match = sum(1 for w in query_words if w in combined)
                         has_negation = any(nw in combined for nw in negation_words)
                         
@@ -362,25 +372,27 @@ class FactChecker:
                 country_found = country_lower in content or country_lower in summary
                 
                 if position_found and country_found:
-                    return True, f"✓ Подтверждено в Википедии"
+                    return True, "✓ Подтверждено в Википедии"
                 elif position_found:
                     return None, f"? {person} — {position} (страна неясна)"
                 else:
-                    return False, f"✗ Не найдено в Википедии"
+                    return False, "✗ Не найдено в Википедии"
             
             if organization:
                 if organization.lower() in content or organization.lower() in summary:
-                    return True, f"✓ Найдено в Википедии"
+                    return True, "✓ Найдено в Википедии"
                 else:
-                    return False, f"✗ Не найдено в Википедии"
+                    return False, "✗ Не найдено в Википедии"
             
-            return True, f"✓ Статья найдена в Википедии"
+            return True, "✓ Статья найдена в Википедии"
                 
         except Exception as e:
             return None, f"Ошибка Wikipedia: {e}"
     
-    def verify(self, text):
-        theme = self.detect_theme(text)
+    def verify(self, text, theme=None):
+        # Если тема не выбрана пользователем — определяем автоматически
+        if not theme or theme == 'авто':
+            theme = self.detect_theme(text)
         
         quick_result = self.check_quick_facts(text)
         if quick_result[0] is not None:
@@ -418,7 +430,7 @@ class FactChecker:
                     'theme': theme
                 }
             
-            # Потом обычный поиск подтверждений
+            # Потом обычный поиск упоминаний
             ddg_result = self.search_duckduckgo(text)
             links = ddg_result[2] if len(ddg_result) > 2 else []
             return {
@@ -545,5 +557,3 @@ if __name__ == "__main__":
         print(f"Тема: {result['theme']}")
         print(f"Вердикт: {result['verdict']} ({result['confidence']:.0%})")
         print(f"Причина: {result['reason']}")
-        if result['details']:
-            print(f"Ссылки: {result['details'][0].get('links', [])[:3]}")
