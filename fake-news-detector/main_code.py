@@ -258,25 +258,27 @@ class FactChecker:
                 results = ddgs.text(query, max_results=10)
 
                 if not results:
-                    return None, "Ничего не найдено"
+                    return None, "Ничего не найдено", []
 
                 query_words = query.lower().split()
                 matches = 0
+                links = []
 
                 for r in results:
                     combined = (r['title'] + " " + r['body']).lower()
                     if all(word in combined for word in query_words):
                         matches += 1
+                        links.append(r['href'])
 
                 if matches >= 3:
-                    return None, f"? Найдено {matches} упоминаний, но требуется проверка смысла"
+                    return None, f"? Найдено {matches} упоминаний, но требуется проверка смысла", links[:5]
                 elif matches >= 1:
-                    return None, f"? Найдено {matches} упоминание, требуется проверка смысла"
+                    return None, f"? Найдено {matches} упоминание, требуется проверка смысла", links[:5]
                 else:
-                    return False, "✗ Не найдено даже упоминаний темы"
+                    return False, "✗ Не найдено даже упоминаний темы", []
 
         except Exception as e:
-            return None, f"Ошибка поиска: {e}"
+            return None, f"Ошибка поиска: {e}", []
 
     def check_refutations(self, query):
         """Ищет статьи, опровергающие утверждение."""
@@ -398,7 +400,7 @@ class FactChecker:
         
         entities = self.extract_entities(text)
         
-                if not entities['persons'] and not entities['events'] and not entities['organizations']:
+        if not entities['persons'] and not entities['events'] and not entities['organizations']:
             # Сначала ищем опровержения
             refute_result = self.check_refutations(text)
             if refute_result[0] and "Найдено 2" in refute_result[1]:
@@ -418,7 +420,7 @@ class FactChecker:
             
             # Потом обычный поиск подтверждений
             ddg_result = self.search_duckduckgo(text)
-            links = [r['href'] for r in ddg_result[2]] if len(ddg_result) > 2 and ddg_result[2] else []
+            links = ddg_result[2] if len(ddg_result) > 2 else []
             return {
                 'verdict': 'НЕИЗВЕСТНО' if ddg_result[0] is None else ('ПРАВДА' if ddg_result[0] else 'ФЕЙК'),
                 'reason': ddg_result[1],
@@ -451,7 +453,7 @@ class FactChecker:
                 })
             else:
                 ddg_result = self.search_duckduckgo(f"{person} {position} {country}")
-                links = [r['href'] for r in ddg_result[2]] if len(ddg_result) > 2 and ddg_result[2] else []
+                links = ddg_result[2] if len(ddg_result) > 2 else []
                 results.append({
                     'fact': f"{person} — {position} {country}",
                     'source': 'DuckDuckGo',
@@ -473,7 +475,7 @@ class FactChecker:
                 })
             else:
                 ddg_result = self.search_duckduckgo(org)
-                links = [r['href'] for r in ddg_result[2]] if len(ddg_result) > 2 and ddg_result[2] else []
+                links = ddg_result[2] if len(ddg_result) > 2 else []
                 results.append({
                     'fact': f"Организация: {org}",
                     'source': 'DuckDuckGo',
@@ -498,7 +500,7 @@ class FactChecker:
                     })
                 else:
                     ddg_result = self.search_duckduckgo(query)
-                    links = [r['href'] for r in ddg_result[2]] if len(ddg_result) > 2 and ddg_result[2] else []
+                    links = ddg_result[2] if len(ddg_result) > 2 else []
                     results.append({
                         'fact': f"Событие: {event} в {country}",
                         'source': 'DuckDuckGo',
