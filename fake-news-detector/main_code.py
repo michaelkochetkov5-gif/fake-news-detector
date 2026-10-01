@@ -2,6 +2,8 @@ from ddgs import DDGS
 import wikipedia
 import re
 import feedparser
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 # ===== RSS ЛЕНТЫ =====
 RSS_FEEDS = {
@@ -158,64 +160,117 @@ QUICK_FACTS = {
 STOP_WORDS = {'и', 'в', 'на', 'с', 'по', 'за', 'из', 'у', 'к', 'о', 'а', 'но',
               'или', 'это', 'как', 'что', 'не', 'был', 'была', 'быть', 'есть'}
 
+
 class FactChecker:
     def __init__(self):
         wikipedia.set_lang("ru")
-    
+
+        # ===== ЛОКАЛЬНАЯ ML-МОДЕЛЬ =====
+        self.model_path = "models/fake_news_rubert"
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+        self.model = AutoModelForSequenceClassification.from_pretrained(self.model_path)
+        self.model.eval()
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(self.device)
+
     def detect_theme(self, text):
         text_lower = text.lower()
         scores = {}
-        
+
         for theme, keywords in THEME_KEYWORDS.items():
             scores[theme] = sum(1 for kw in keywords if kw in text_lower)
-        
+
         best_theme = max(scores, key=scores.get)
         if scores[best_theme] > 0:
             return best_theme
         return 'общее'
-    
+
     def check_quick_facts(self, text):
         text_lower = text.lower()
-        
+
         for fact, is_true in QUICK_FACTS.items():
             if fact in text_lower:
                 if is_true:
                     return True, f"✓ Подтверждено: {fact}"
                 else:
                     return False, f"✗ ФЕЙК: {fact}"
-        
+
         return None, "Нет в базе быстрых фактов"
-    
+
+    def check_model(self, text):
+        """Проверка текста локальной моделью rubert-tiny2.
+
+        Метки модели:
+        0 — фейк
+        1 — правда
+        """
+        try:
+            inputs = self.tokenizer(
+                text,
+                truncation=True,
+                max_length=256,
+                return_tensors="pt"
+            ).to(self.device)
+
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+                probs = torch.softmax(outputs.logits, dim=-1)[0]
+
+            fake_probability = float(probs[0])
+            real_probability = float(probs[1])
+
+            if fake_probability > real_probability:
+                prediction = "ФЕЙК"
+            else:
+                prediction = "ПРАВДА"
+
+            return {
+                "fake_probability": fake_probability,
+                "real_probability": real_probability,
+                "prediction": prediction,
+                "confidence": max(fake_probability, real_probability)
+            }
+
+        except Exception as e:
+            return {
+                "fake_probability": 0.5,
+                "real_probability": 0.5,
+                "prediction": "НЕИЗВЕСТНО",
+                "confidence": 0.5,
+                "error": str(e)
+            }
+
     def extract_entities(self, text):
         entities = {
             'persons': [], 'positions': [], 'countries': [],
             'events': [], 'organizations': []
         }
-        
+
         text_norm = text.strip()
         if text_norm:
             text_norm = text_norm[0].upper() + text_norm[1:]
-        
+
         pattern1 = r'([А-Яа-яЁё]+)\s+(президент|министр|глава|канцлер|директор)\s+([А-Яа-яЁё]+)'
         matches1 = re.findall(pattern1, text_norm, re.IGNORECASE)
         for match in matches1:
             entities['persons'].append(match[0])
             entities['positions'].append(match[1])
             entities['countries'].append(match[2])
-        
+
         pattern2 = r'(взрыв|стрельба|атака|произошло|случилось)\s+(в|на)\s+([А-Я][а-я]+)'
         matches2 = re.findall(pattern2, text, re.IGNORECASE)
         for match in matches2:
             entities['events'].append(match[0])
             entities['countries'].append(match[2])
-        
+
         pattern3 = r'(компания|университет|школа|институт|организация)\s+([А-Я][а-я]+)'
         matches3 = re.findall(pattern3, text, re.IGNORECASE)
         for match in matches3:
             entities['organizations'].append(match[1])
-        
+
         return entities
-    
+
     def get_rss_for_theme(self, theme):
         if theme == 'еда':
             return {k: v for k, v in RSS_FEEDS.items() if k in ['eda_ru', 'povarenok', 'gastronom']}
@@ -237,19 +292,19 @@ class FactChecker:
             return {k: v for k, v in RSS_FEEDS.items() if k in ['factroom', 'fishki', 'adme', 'lifehacker']}
         else:
             return RSS_FEEDS
-    
+
     def search_rss_news(self, query, theme='общее'):
         try:
             feeds = self.get_rss_for_theme(theme)
             all_matches = []
-            
+
             for source, url in feeds.items():
                 feed = feedparser.parse(url)
-                
+
                 for entry in feed.entries[:20]:
                     title = entry.title.lower()
                     summary = entry.get('summary', '').lower()
-                    
+
                     if query.lower() in title or query.lower() in summary:
                         all_matches.append({
                             'source': source,
@@ -257,17 +312,17 @@ class FactChecker:
                             'link': entry.link,
                             'published': entry.get('published', 'N/A')
                         })
-            
+
             if len(all_matches) >= 2:
                 return True, f"✓ Найдено в {len(all_matches)} источниках", all_matches[:5]
             elif len(all_matches) == 1:
                 return None, "? Найдено в 1 источнике", all_matches
             else:
                 return False, "✗ Новостей не найдено", []
-                
+
         except Exception as e:
             return None, f"Ошибка RSS: {e}", []
-    
+
     def search_duckduckgo(self, query):
         try:
             with DDGS() as ddgs:
@@ -305,35 +360,35 @@ class FactChecker:
             f"{query} фейк разоблачение",
             f"{query} это ложь",
         ]
-        
+
         negation_words = ['не является', 'не был', 'опроверг', 'фейк', 'ложь',
                           'неправда', 'миф', 'дезинформация', 'не соответствует']
-        
+
         refutations_found = 0
         links = []
-        
+
         try:
             with DDGS() as ddgs:
                 for rq in refute_queries:
                     results = ddgs.text(rq, max_results=5)
                     query_words = query.lower().split()
-                    
+
                     for r in results:
                         combined = (r['title'] + " " + r['body']).lower()
-                        
+
                         topic_match = sum(1 for w in query_words if w in combined)
                         has_negation = any(nw in combined for nw in negation_words)
-                        
+
                         if topic_match >= 2 and has_negation:
                             refutations_found += 1
                             links.append(r['href'])
-            
+
             if refutations_found >= 2:
                 return True, f"Найдено {refutations_found} возможных опровержения — требуется проверка смысла", links[:5]
             elif refutations_found == 1:
                 return True, "Найдено 1 возможное опровержение — требуется проверка смысла", links[:5]
             return False, "Опровержений не найдено", []
-            
+
         except Exception as e:
             return False, f"Ошибка поиска опровержений: {e}", []
 
@@ -344,47 +399,47 @@ class FactChecker:
             words = [w for w in re.findall(r'[а-яё]+', text.lower()) if w not in STOP_WORDS and len(w) > 2]
             if not words:
                 return None, "Нет значимых слов для проверки"
-            
+
             search_results = wikipedia.search(text, results=3)
             if not search_results:
                 return None, "Статья не найдена"
-            
+
             page = wikipedia.page(search_results[0], auto_suggest=False)
             content = (page.summary + " " + page.content[:5000]).lower()
-            
+
             found = sum(1 for w in words if w[:5] in content)
             ratio = found / len(words)
-            
+
             if ratio >= 0.99:
                 return True, f"✓ Утверждение согласуется со статьёй «{page.title}» (Википедия)"
             elif ratio >= 0.5:
                 return None, f"? Тема найдена («{page.title}»), но утверждение требует проверки смысла"
             else:
                 return None, f"? Тема найдена («{page.title}»), но утверждение не подтверждено напрямую"
-                
+
         except Exception as e:
             return None, f"Ошибка Wikipedia: {e}"
-            
+
     def check_wikipedia(self, person=None, position=None, country=None, organization=None, query=None):
         try:
             search_query = person or organization or query
-            
+
             if not search_query:
                 return None, "Нет запроса для поиска"
-            
+
             search_results = wikipedia.search(search_query, results=3)
-            
+
             if not search_results:
                 return None, f"Не найдено статью о {search_query}"
-            
+
             page = wikipedia.page(search_results[0], auto_suggest=False)
             content = page.content.lower()
             summary = page.summary.lower()
-            
+
             if person and position and country:
                 position_lower = position.lower()
                 country_lower = country.lower()
-                
+
                 if "президент" in position_lower:
                     if country_lower == "россии" and "путин" in person.lower():
                         if "президент россии" in content or "президент российской" in content:
@@ -396,37 +451,37 @@ class FactChecker:
                     elif country_lower == "сша" and "трамп" in person.lower():
                         if "президент сша" in content or "45-й президент" in content:
                             return True, "✓ Трамп — президент США (Википедия)"
-            
+
             if position and country:
                 position_lower = position.lower()
                 country_lower = country.lower()
-                
+
                 position_found = position_lower in content or position_lower in summary
                 country_found = country_lower in content or country_lower in summary
-                
+
                 if position_found and country_found:
                     return True, "✓ Подтверждено в Википедии"
                 elif position_found:
                     return None, f"? {person} — {position} (страна неясна)"
                 else:
                     return False, "✗ Не найдено в Википедии"
-            
+
             if organization:
                 if organization.lower() in content or organization.lower() in summary:
                     return True, "✓ Найдено в Википедии"
                 else:
                     return False, "✗ Не найдено в Википедии"
-            
+
             return True, "✓ Статья найдена в Википедии"
-                
+
         except Exception as e:
             return None, f"Ошибка Wikipedia: {e}"
-    
+
     def verify(self, text, theme=None):
         # Если тема не выбрана пользователем — определяем автоматически
         if not theme or theme == 'авто':
             theme = self.detect_theme(text)
-        
+
         quick_result = self.check_quick_facts(text)
         if quick_result[0] is not None:
             return {
@@ -442,9 +497,12 @@ class FactChecker:
                 }],
                 'theme': theme
             }
-        
+
+        # ===== ML-МОДЕЛЬ =====
+        model_result = self.check_model(text)
+
         entities = self.extract_entities(text)
-        
+
         if not entities['persons'] and not entities['events'] and not entities['organizations']:
             # 1. Проверка утверждения по Википедии
             wiki_claim = self.check_wikipedia_claim(text)
@@ -462,23 +520,30 @@ class FactChecker:
                     }],
                     'theme': theme
                 }
-            
+
             # 2. Поиск опровержений — только как подсказка, НЕ вердикт
             refute_result = self.check_refutations(text)
-            
+
             # 3. Обычный поиск упоминаний
             ddg_result = self.search_duckduckgo(text)
             links = ddg_result[2] if len(ddg_result) > 2 else []
-            
+
             if refute_result[0]:
                 links = list(dict.fromkeys(refute_result[2] + links))[:5]
-            
+
             reason = ddg_result[1]
             if refute_result[0]:
                 reason += f". {refute_result[1]}"
-            
+
+            if ddg_result[0] is None:
+                verdict = 'НЕИЗВЕСТНО'
+            elif ddg_result[0]:
+                verdict = 'ПРАВДА'
+            else:
+                verdict = 'ФЕЙК'
+
             return {
-                'verdict': 'НЕИЗВЕСТНО' if ddg_result[0] is None else ('ПРАВДА' if ddg_result[0] else 'ФЕЙК'),
+                'verdict': verdict,
                 'reason': reason,
                 'confidence': 0.5,
                 'details': [{
@@ -487,18 +552,28 @@ class FactChecker:
                     'result': ddg_result[0],
                     'reason': reason,
                     'links': links
+                }, {
+                    'fact': 'ML-модель rubert-tiny2',
+                    'source': 'Локальная ML-модель',
+                    'result': None if model_result['prediction'] == 'НЕИЗВЕСТНО' else (model_result['prediction'] == 'ПРАВДА'),
+                    'reason': (
+                        f"Модель: {model_result['prediction']} "
+                        f"(фейк: {model_result['fake_probability']:.2f}, "
+                        f"правда: {model_result['real_probability']:.2f})"
+                    ),
+                    'links': []
                 }],
                 'theme': theme
             }
-        
+
         results = []
-        
+
         for i, person in enumerate(entities['persons']):
             position = entities['positions'][i] if i < len(entities['positions']) else ''
             country = entities['countries'][i] if i < len(entities['countries']) else ''
-            
+
             wiki_result = self.check_wikipedia(person=person, position=position, country=country)
-            
+
             if wiki_result[0] is not None:
                 results.append({
                     'fact': f"{person} — {position} {country}",
@@ -517,10 +592,10 @@ class FactChecker:
                     'reason': ddg_result[1],
                     'links': links
                 })
-        
+
         for org in entities['organizations']:
             wiki_result = self.check_wikipedia(organization=org)
-            
+
             if wiki_result[0] is not None:
                 results.append({
                     'fact': f"Организация: {org}",
@@ -539,11 +614,11 @@ class FactChecker:
                     'reason': ddg_result[1],
                     'links': links
                 })
-        
+
         for event in entities['events']:
             for country in entities['countries']:
                 query = f"{event} {country}"
-                
+
                 rss_result = self.search_rss_news(query, theme)
                 if rss_result[0] is not None:
                     links = [item['link'] for item in rss_result[2]] if len(rss_result) > 2 and rss_result[2] else []
@@ -564,39 +639,78 @@ class FactChecker:
                         'reason': ddg_result[1],
                         'links': links
                     })
-        
+
+        # ===== ML-МОДЕЛЬ КАК ДОПОЛНИТЕЛЬНЫЙ ИСТОЧНИК =====
+        results.append({
+            'fact': 'ML-модель rubert-tiny2',
+            'source': 'Локальная ML-модель',
+            'result': None if model_result['prediction'] == 'НЕИЗВЕСТНО' else (model_result['prediction'] == 'ПРАВДА'),
+            'reason': (
+                f"Модель: {model_result['prediction']} "
+                f"(фейк: {model_result['fake_probability']:.2f}, "
+                f"правда: {model_result['real_probability']:.2f})"
+            ),
+            'links': []
+        })
+
         true_count = sum(1 for r in results if r['result'] == True)
         false_count = sum(1 for r in results if r['result'] == False)
-        
-        if false_count > 0:
-            verdict, confidence = 'ФЕЙК', false_count / len(results)
-        elif true_count == len(results):
-            verdict, confidence = 'ПРАВДА', 1.0
+
+        # Оценка по внешним источникам: от -1 до 1
+        if results:
+            sources_score = (true_count - false_count) / len(results)
         else:
-            verdict, confidence = 'НЕИЗВЕСТНО', 0.5
-        
+            sources_score = 0
+
+        # Оценка модели: от -1 до 1
+        model_score = model_result['real_probability'] - model_result['fake_probability']
+
+        # Источники важнее, модель — вспомогательный сигнал
+        final_score = 0.7 * sources_score + 0.3 * model_score
+
+        if final_score >= 0.3:
+            verdict = 'ПРАВДА'
+            confidence = min(0.99, 0.5 + final_score / 2)
+        elif final_score <= -0.3:
+            verdict = 'ФЕЙК'
+            confidence = min(0.99, 0.5 - final_score / 2)
+        else:
+            verdict = 'НЕИЗВЕСТНО'
+            confidence = 0.5
+
         return {
             'verdict': verdict,
             'reason': results[0]['reason'] if results else 'Нет данных',
             'confidence': confidence,
             'details': results,
-            'theme': theme
+            'theme': theme,
+            'model': model_result
         }
+
 
 if __name__ == "__main__":
     checker = FactChecker()
-    
+
     tests = [
         "Земля круглая",
         "Земля плоская",
         "Путин президент России",
         "Сахар вызывает зависимость сильнее кокаина",
         "Minecraft самая продаваемая игра",
+        "В НАТО составили наступательный план по захвату и оккупации России"
     ]
-    
+
     for test in tests:
         print(f"\n{test}:")
         result = checker.verify(test)
         print(f"Тема: {result['theme']}")
         print(f"Вердикт: {result['verdict']} ({result['confidence']:.0%})")
         print(f"Причина: {result['reason']}")
+
+        if 'model' in result:
+            model = result['model']
+            print(
+                f"ML: {model['prediction']} | "
+                f"фейк {model['fake_probability']:.2f} | "
+                f"правда {model['real_probability']:.2f}"
+            )
