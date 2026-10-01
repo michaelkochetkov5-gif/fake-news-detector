@@ -175,23 +175,33 @@ class FactChecker:
         self.model.to(self.device)
 
     def detect_theme(self, text):
-        """Определяет тему по словам.
+        """Определяет тему по ключевым словам.
 
-        Используется поиск по началу слова, поэтому «Турции»
-        не будет ошибочно относить текст к теме «музыка» из-за слова «тур».
+        Для коротких слов требуется точное совпадение,
+        чтобы «тур» не совпал со словом «Турции».
         """
         text_lower = text.lower()
         scores = {}
 
         for theme, keywords in THEME_KEYWORDS.items():
-            scores[theme] = sum(
-                1 for kw in keywords
-                if re.search(rf'\b{re.escape(kw)}', text_lower)
-            )
+            score = 0
+
+            for kw in keywords:
+                if len(kw) < 4:
+                    pattern = rf'\b{re.escape(kw)}\b'
+                else:
+                    pattern = rf'\b{re.escape(kw)}'
+
+                if re.search(pattern, text_lower):
+                    score += 1
+
+            scores[theme] = score
 
         best_theme = max(scores, key=scores.get)
+
         if scores[best_theme] > 0:
             return best_theme
+
         return 'общее'
 
     def check_quick_facts(self, text):
@@ -408,11 +418,16 @@ class FactChecker:
         Если все значимые слова утверждения найдены в статье — ПРАВДА.
         """
         try:
-            words = [w for w in re.findall(r'[а-яё]+', text.lower()) if w not in STOP_WORDS and len(w) > 2]
+            words = [
+                w for w in re.findall(r'[а-яё]+', text.lower())
+                if w not in STOP_WORDS and len(w) > 2
+            ]
+
             if not words:
                 return None, "Нет значимых слов для проверки"
 
             search_results = wikipedia.search(text, results=3)
+
             if not search_results:
                 return None, "Статья не найдена"
 
@@ -495,7 +510,10 @@ class FactChecker:
             theme = self.detect_theme(text)
 
         quick_result = self.check_quick_facts(text)
+
         if quick_result[0] is not None:
+            model_result = self.check_model(text)
+
             return {
                 'verdict': 'ФЕЙК' if not quick_result[0] else 'ПРАВДА',
                 'reason': quick_result[1],
@@ -508,7 +526,7 @@ class FactChecker:
                     'links': []
                 }],
                 'theme': theme,
-                'model': self.check_model(text)
+                'model': model_result
             }
 
         # ===== ML-МОДЕЛЬ =====
@@ -520,6 +538,7 @@ class FactChecker:
         if not entities['persons'] and not entities['events'] and not entities['organizations']:
             # 1. Проверка утверждения по Википедии
             wiki_claim = self.check_wikipedia_claim(text)
+
             if wiki_claim[0] is True:
                 return {
                     'verdict': 'ПРАВДА',
@@ -557,16 +576,22 @@ class FactChecker:
                 links = list(dict.fromkeys(refute_result[2] + links))[:5]
 
             reason = ddg_result[1]
+
             if refute_result[0]:
                 reason += f". {refute_result[1]}"
 
             # Поиск недоступен или ничего не нашёл:
             # нельзя автоматически считать текст фейком.
             search_failed = (
-                ddg_result[0] is None and
                 (
-                    "Ошибка поиска" in ddg_result[1] or
-                    "Ничего не найдено" in ddg_result[1] or
+                    ddg_result[0] is None and
+                    (
+                        "Ошибка поиска" in ddg_result[1] or
+                        "Ничего не найдено" in ddg_result[1]
+                    )
+                ) or
+                (
+                    ddg_result[0] is False and
                     "Не найдено даже упоминаний" in ddg_result[1]
                 )
             )
@@ -628,6 +653,7 @@ class FactChecker:
             else:
                 ddg_result = self.search_duckduckgo(f"{person} {position} {country}")
                 links = ddg_result[2] if len(ddg_result) > 2 else []
+
                 results.append({
                     'fact': f"{person} — {position} {country}",
                     'source': 'DuckDuckGo',
@@ -650,6 +676,7 @@ class FactChecker:
             else:
                 ddg_result = self.search_duckduckgo(org)
                 links = ddg_result[2] if len(ddg_result) > 2 else []
+
                 results.append({
                     'fact': f"Организация: {org}",
                     'source': 'DuckDuckGo',
@@ -663,8 +690,10 @@ class FactChecker:
                 query = f"{event} {country}"
 
                 rss_result = self.search_rss_news(query, theme)
+
                 if rss_result[0] is not None:
                     links = [item['link'] for item in rss_result[2]] if len(rss_result) > 2 and rss_result[2] else []
+
                     results.append({
                         'fact': f"Событие: {event} в {country}",
                         'source': 'RSS Новости',
@@ -675,6 +704,7 @@ class FactChecker:
                 else:
                     ddg_result = self.search_duckduckgo(query)
                     links = ddg_result[2] if len(ddg_result) > 2 else []
+
                     results.append({
                         'fact': f"Событие: {event} в {country}",
                         'source': 'DuckDuckGo',
@@ -705,7 +735,6 @@ class FactChecker:
             sources_score = 0
 
         model_score = model_result['real_probability'] - model_result['fake_probability']
-
         final_score = 0.7 * sources_score + 0.3 * model_score
 
         if final_score >= 0.3:
