@@ -166,7 +166,7 @@ class FactChecker:
         wikipedia.set_lang("ru")
 
         # ===== ЛОКАЛЬНАЯ ML-МОДЕЛЬ =====
-        self.model_path = "models/fake_news_rubert"
+        self.model_path = "models/fake_news_rubert_finetuned"
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
         self.model = AutoModelForSequenceClassification.from_pretrained(self.model_path)
         self.model.eval()
