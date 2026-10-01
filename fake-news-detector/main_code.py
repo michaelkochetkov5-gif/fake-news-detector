@@ -355,6 +355,7 @@ class FactChecker:
 
                 for r in results:
                     combined = (r['title'] + " " + r['body']).lower()
+
                     if all(word in combined for word in query_words):
                         matches += 1
                         links.append(r['href'])
@@ -599,19 +600,24 @@ class FactChecker:
             if search_failed:
                 if model_result["confidence"] >= 0.75:
                     verdict = model_result["prediction"]
+                    confidence = model_result["confidence"]
                 else:
                     verdict = "НЕИЗВЕСТНО"
-            elif ddg_result[0] is None:
-                verdict = "НЕИЗВЕСТНО"
-            elif ddg_result[0]:
-                verdict = "ПРАВДА"
+                    confidence = 0.5
             else:
-                verdict = "ФЕЙК"
+                confidence = 0.5
+
+                if ddg_result[0] is None:
+                    verdict = "НЕИЗВЕСТНО"
+                elif ddg_result[0]:
+                    verdict = "ПРАВДА"
+                else:
+                    verdict = "ФЕЙК"
 
             return {
                 'verdict': verdict,
                 'reason': reason,
-                'confidence': 0.5,
+                'confidence': confidence,
                 'details': [{
                     'fact': text,
                     'source': 'DuckDuckGo',
