@@ -503,6 +503,7 @@ class FactChecker:
 
         entities = self.extract_entities(text)
 
+        # ===== ВЕТКА: НЕТ СУЩНОСТЕЙ =====
         if not entities['persons'] and not entities['events'] and not entities['organizations']:
             # 1. Проверка утверждения по Википедии
             wiki_claim = self.check_wikipedia_claim(text)
@@ -518,7 +519,8 @@ class FactChecker:
                         'reason': wiki_claim[1],
                         'links': []
                     }],
-                    'theme': theme
+                    'theme': theme,
+                    'model': model_result
                 }
 
             # 2. Поиск опровержений — только как подсказка, НЕ вердикт
@@ -563,9 +565,11 @@ class FactChecker:
                     ),
                     'links': []
                 }],
-                'theme': theme
+                'theme': theme,
+                'model': model_result
             }
 
+        # ===== ВЕТКА: ЕСТЬ СУЩНОСТИ =====
         results = []
 
         for i, person in enumerate(entities['persons']):
