@@ -656,16 +656,13 @@ class FactChecker:
         true_count = sum(1 for r in results if r['result'] == True)
         false_count = sum(1 for r in results if r['result'] == False)
 
-        # Оценка по внешним источникам: от -1 до 1
         if results:
             sources_score = (true_count - false_count) / len(results)
         else:
             sources_score = 0
 
-        # Оценка модели: от -1 до 1
         model_score = model_result['real_probability'] - model_result['fake_probability']
 
-        # Источники важнее, модель — вспомогательный сигнал
         final_score = 0.7 * sources_score + 0.3 * model_score
 
         if final_score >= 0.3:
@@ -707,18 +704,3 @@ if __name__ == "__main__":
         print(f"Вероятность фейка: {result['fake_probability']:.3f}")
         print(f"Вероятность правды: {result['real_probability']:.3f}")
         print("-" * 60)
-
-    for test in tests:
-        print(f"\n{test}:")
-        result = checker.verify(test)
-        print(f"Тема: {result['theme']}")
-        print(f"Вердикт: {result['verdict']} ({result['confidence']:.0%})")
-        print(f"Причина: {result['reason']}")
-
-        if 'model' in result:
-            model = result['model']
-            print(
-                f"ML: {model['prediction']} | "
-                f"фейк {model['fake_probability']:.2f} | "
-                f"правда {model['real_probability']:.2f}"
-            )
