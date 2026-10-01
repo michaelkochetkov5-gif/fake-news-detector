@@ -691,14 +691,22 @@ class FactChecker:
 if __name__ == "__main__":
     checker = FactChecker()
 
+    print("Тест ML-модели rubert-tiny2\n")
+
     tests = [
-        "Земля круглая",
-        "Земля плоская",
-        "Путин президент России",
-        "Сахар вызывает зависимость сильнее кокаина",
-        "Minecraft самая продаваемая игра",
-        "В НАТО составили наступательный план по захвату и оккупации России"
+        "Правительство сообщило о снижении ключевой ставки.",
+        "В НАТО составили наступательный план по захвату и оккупации России.",
+        "Учёные сообщили о новом открытии в области космических исследований."
     ]
+
+    for text in tests:
+        result = checker.check_model(text)
+
+        print(f"Текст: {text}")
+        print(f"Предсказание: {result['prediction']}")
+        print(f"Вероятность фейка: {result['fake_probability']:.3f}")
+        print(f"Вероятность правды: {result['real_probability']:.3f}")
+        print("-" * 60)
 
     for test in tests:
         print(f"\n{test}:")
