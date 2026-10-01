@@ -175,11 +175,19 @@ class FactChecker:
         self.model.to(self.device)
 
     def detect_theme(self, text):
+        """Определяет тему по словам.
+
+        Используется поиск по началу слова, поэтому «Турции»
+        не будет ошибочно относить текст к теме «музыка» из-за слова «тур».
+        """
         text_lower = text.lower()
         scores = {}
 
         for theme, keywords in THEME_KEYWORDS.items():
-            scores[theme] = sum(1 for kw in keywords if kw in text_lower)
+            scores[theme] = sum(
+                1 for kw in keywords
+                if re.search(rf'\b{re.escape(kw)}', text_lower)
+            )
 
         best_theme = max(scores, key=scores.get)
         if scores[best_theme] > 0:
@@ -353,8 +361,10 @@ class FactChecker:
 
     def check_refutations(self, query):
         """Ищет статьи, опровергающие утверждение.
-        ВАЖНО: результат используется только как подсказка,
-        автоматический вердикт ФЕЙК по нему не ставится."""
+
+        Результат используется только как подсказка:
+        автоматический вердикт ФЕЙК по нему не ставится.
+        """
         refute_queries = [
             f"{query} опровержение",
             f"{query} фейк разоблачение",
@@ -393,8 +403,10 @@ class FactChecker:
             return False, f"Ошибка поиска опровержений: {e}", []
 
     def check_wikipedia_claim(self, text):
-        """Проверка короткого утверждения по Википедии:
-        если все значимые слова утверждения найдены в статье — ПРАВДА."""
+        """Проверка короткого утверждения по Википедии.
+
+        Если все значимые слова утверждения найдены в статье — ПРАВДА.
+        """
         try:
             words = [w for w in re.findall(r'[а-яё]+', text.lower()) if w not in STOP_WORDS and len(w) > 2]
             if not words:
@@ -495,7 +507,8 @@ class FactChecker:
                     'reason': quick_result[1],
                     'links': []
                 }],
-                'theme': theme
+                'theme': theme,
+                'model': self.check_model(text)
             }
 
         # ===== ML-МОДЕЛЬ =====
@@ -518,6 +531,16 @@ class FactChecker:
                         'result': True,
                         'reason': wiki_claim[1],
                         'links': []
+                    }, {
+                        'fact': 'ML-модель rubert-tiny2',
+                        'source': 'Локальная ML-модель',
+                        'result': None if model_result['prediction'] == 'НЕИЗВЕСТНО' else (model_result['prediction'] == 'ПРАВДА'),
+                        'reason': (
+                            f"Модель: {model_result['prediction']} "
+                            f"(фейк: {model_result['fake_probability']:.2f}, "
+                            f"правда: {model_result['real_probability']:.2f})"
+                        ),
+                        'links': []
                     }],
                     'theme': theme,
                     'model': model_result
@@ -537,12 +560,28 @@ class FactChecker:
             if refute_result[0]:
                 reason += f". {refute_result[1]}"
 
-            if ddg_result[0] is None:
-                verdict = 'НЕИЗВЕСТНО'
+            # Поиск недоступен или ничего не нашёл:
+            # нельзя автоматически считать текст фейком.
+            search_failed = (
+                ddg_result[0] is None and
+                (
+                    "Ошибка поиска" in ddg_result[1] or
+                    "Ничего не найдено" in ddg_result[1] or
+                    "Не найдено даже упоминаний" in ddg_result[1]
+                )
+            )
+
+            if search_failed:
+                if model_result["confidence"] >= 0.75:
+                    verdict = model_result["prediction"]
+                else:
+                    verdict = "НЕИЗВЕСТНО"
+            elif ddg_result[0] is None:
+                verdict = "НЕИЗВЕСТНО"
             elif ddg_result[0]:
-                verdict = 'ПРАВДА'
+                verdict = "ПРАВДА"
             else:
-                verdict = 'ФЕЙК'
+                verdict = "ФЕЙК"
 
             return {
                 'verdict': verdict,
