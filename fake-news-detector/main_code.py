@@ -341,34 +341,75 @@ class FactChecker:
         except Exception as e:
             return None, f"Ошибка RSS: {e}", []
 
-    def search_duckduckgo(self, query):
-        try:
-            with DDGS() as ddgs:
-                results = ddgs.text(query, max_results=10)
-
-                if not results:
-                    return None, "Ничего не найдено", []
-
-                query_words = query.lower().split()
-                matches = 0
-                links = []
-
-                for r in results:
-                    combined = (r['title'] + " " + r['body']).lower()
-
-                    if all(word in combined for word in query_words):
-                        matches += 1
-                        links.append(r['href'])
-
-                if matches >= 3:
-                    return None, f"? Найдено {matches} упоминаний, но требуется проверка смысла", links[:5]
-                elif matches >= 1:
-                    return None, f"? Найдено {matches} упоминание, требуется проверка смысла", links[:5]
-                else:
-                    return False, "✗ Не найдено даже упоминаний темы", []
-
-        except Exception as e:
-            return None, f"Ошибка поиска: {e}", []
+        def search_duckduckgo(self, query):
+            """Ищет упоминания через DuckDuckGo с сокращением запроса и повторами."""
+            query = " ".join(str(query).split())
+    
+            # Длинные тексты плохо ищутся: берём наиболее информативное начало
+            search_query = query
+            if len(search_query) > 220:
+                search_query = search_query[:220].rsplit(" ", 1)[0]
+    
+            attempts = [
+                search_query,
+                " ".join(search_query.split()[:18]),
+                " ".join(search_query.split()[:10]),
+            ]
+    
+            last_error = None
+    
+            for attempt_query in attempts:
+                for backend in ("auto", "html", "lite"):
+                    try:
+                        with DDGS() as ddgs:
+                            results = list(
+                                ddgs.text(
+                                    attempt_query,
+                                    max_results=10,
+                                    backend=backend,
+                                )
+                            )
+    
+                        if not results:
+                            continue
+    
+                        query_words = attempt_query.lower().split()
+                        matches = 0
+                        links = []
+    
+                        for r in results:
+                            combined = (
+                                str(r.get("title", "")) + " " +
+                                str(r.get("body", ""))
+                            ).lower()
+    
+                            if all(word in combined for word in query_words):
+                                matches += 1
+                                links.append(r.get("href", ""))
+    
+                        links = [link for link in links if link]
+    
+                        if matches >= 3:
+                            return (
+                                None,
+                                f"? Найдено {matches} упоминаний, требуется проверка смысла",
+                                links[:5],
+                            )
+                        if matches >= 1:
+                            return (
+                                None,
+                                f"? Найдено {matches} упоминание, требуется проверка смысла",
+                                links[:5],
+                            )
+    
+                    except Exception as e:
+                        last_error = e
+                        continue
+    
+            if last_error:
+                return None, f"Ошибка поиска: {last_error}", []
+    
+            return False, "✗ Не найдено даже упоминаний темы", []
 
     def check_refutations(self, query):
         """Ищет статьи, опровергающие утверждение.
