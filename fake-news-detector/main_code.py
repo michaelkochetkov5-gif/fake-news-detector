@@ -175,11 +175,7 @@ class FactChecker:
         self.model.to(self.device)
 
     def detect_theme(self, text):
-        """Определяет тему по ключевым словам.
-
-        Для коротких слов требуется точное совпадение,
-        чтобы «тур» не совпал со словом «Турции».
-        """
+        """Определяет тему по ключевым словам."""
         text_lower = text.lower()
         scores = {}
 
@@ -217,7 +213,7 @@ class FactChecker:
         return None, "Нет в базе быстрых фактов"
 
     def check_model(self, text):
-        """Проверка текста локальной моделью rubert-tiny2.
+        """Проверка текста локальной моделью.
 
         Метки модели:
         0 — фейк
@@ -316,107 +312,121 @@ class FactChecker:
             feeds = self.get_rss_for_theme(theme)
             all_matches = []
 
+            words = [
+                w for w in re.findall(r"[а-яёa-z0-9]+", str(query).lower())
+                if len(w) >= 5
+            ]
+            words = list(dict.fromkeys(words))[:8]
+
+            if not words:
+                return None, "Не удалось выделить ключевые слова для поиска", []
+
             for source, url in feeds.items():
-                feed = feedparser.parse(url)
+                try:
+                    feed = feedparser.parse(url, request_headers={
+                        "User-Agent": "Mozilla/5.0"
+                    })
 
-                for entry in feed.entries[:20]:
-                    title = entry.title.lower()
-                    summary = entry.get('summary', '').lower()
+                    for entry in feed.entries[:30]:
+                        title = str(entry.get("title", "")).lower()
+                        summary = str(entry.get("summary", "")).lower()
+                        combined = title + " " + summary
 
-                    if query.lower() in title or query.lower() in summary:
-                        all_matches.append({
-                            'source': source,
-                            'title': entry.title,
-                            'link': entry.link,
-                            'published': entry.get('published', 'N/A')
-                        })
+                        matches = sum(1 for word in words if word in combined)
+
+                        if matches >= 2:
+                            all_matches.append({
+                                "source": source,
+                                "title": entry.get("title", ""),
+                                "link": entry.get("link", ""),
+                                "published": entry.get("published", "N/A"),
+                                "matches": matches,
+                            })
+                except Exception:
+                    continue
+
+            all_matches.sort(key=lambda x: x["matches"], reverse=True)
 
             if len(all_matches) >= 2:
-                return True, f"✓ Найдено в {len(all_matches)} источниках", all_matches[:5]
-            elif len(all_matches) == 1:
-                return None, "? Найдено в 1 источнике", all_matches
-            else:
-                return False, "✗ Новостей не найдено", []
+                return True, f"✓ Найдено {len(all_matches)} релевантных материалов", all_matches[:5]
+            if len(all_matches) == 1:
+                return None, "? Найден 1 релевантный материал", all_matches
+            return False, "✗ Релевантных материалов не найдено", []
 
         except Exception as e:
             return None, f"Ошибка RSS: {e}", []
 
-        def search_duckduckgo(self, query):
-            """Ищет упоминания через DuckDuckGo с сокращением запроса и повторами."""
-            query = " ".join(str(query).split())
-    
-            # Длинные тексты плохо ищутся: берём наиболее информативное начало
-            search_query = query
-            if len(search_query) > 220:
-                search_query = search_query[:220].rsplit(" ", 1)[0]
-    
-            attempts = [
-                search_query,
-                " ".join(search_query.split()[:18]),
-                " ".join(search_query.split()[:10]),
-            ]
-    
-            last_error = None
-    
-            for attempt_query in attempts:
-                for backend in ("auto", "html", "lite"):
-                    try:
-                        with DDGS() as ddgs:
-                            results = list(
-                                ddgs.text(
-                                    attempt_query,
-                                    max_results=10,
-                                    backend=backend,
-                                )
+    def search_duckduckgo(self, query):
+        """Ищет упоминания через DuckDuckGo с сокращением запроса и повторами."""
+        query = " ".join(str(query).split())
+
+        search_query = query
+        if len(search_query) > 220:
+            search_query = search_query[:220].rsplit(" ", 1)[0]
+
+        attempts = [
+            search_query,
+            " ".join(search_query.split()[:18]),
+            " ".join(search_query.split()[:10]),
+        ]
+
+        last_error = None
+
+        for attempt_query in attempts:
+            for backend in ("auto", "html", "lite"):
+                try:
+                    with DDGS() as ddgs:
+                        results = list(
+                            ddgs.text(
+                                attempt_query,
+                                max_results=10,
+                                backend=backend,
                             )
-    
-                        if not results:
-                            continue
-    
-                        query_words = attempt_query.lower().split()
-                        matches = 0
-                        links = []
-    
-                        for r in results:
-                            combined = (
-                                str(r.get("title", "")) + " " +
-                                str(r.get("body", ""))
-                            ).lower()
-    
-                            if all(word in combined for word in query_words):
-                                matches += 1
-                                links.append(r.get("href", ""))
-    
-                        links = [link for link in links if link]
-    
-                        if matches >= 3:
-                            return (
-                                None,
-                                f"? Найдено {matches} упоминаний, требуется проверка смысла",
-                                links[:5],
-                            )
-                        if matches >= 1:
-                            return (
-                                None,
-                                f"? Найдено {matches} упоминание, требуется проверка смысла",
-                                links[:5],
-                            )
-    
-                    except Exception as e:
-                        last_error = e
+                        )
+
+                    if not results:
                         continue
-    
-            if last_error:
-                return None, f"Ошибка поиска: {last_error}", []
-    
-            return False, "✗ Не найдено даже упоминаний темы", []
+
+                    query_words = attempt_query.lower().split()
+                    matches = 0
+                    links = []
+
+                    for r in results:
+                        combined = (
+                            str(r.get("title", "")) + " " +
+                            str(r.get("body", ""))
+                        ).lower()
+
+                        if all(word in combined for word in query_words):
+                            matches += 1
+                            links.append(r.get("href", ""))
+
+                    links = [link for link in links if link]
+
+                    if matches >= 3:
+                        return (
+                            None,
+                            f"? Найдено {matches} упоминаний, требуется проверка смысла",
+                            links[:5],
+                        )
+                    if matches >= 1:
+                        return (
+                            None,
+                            f"? Найдено {matches} упоминание, требуется проверка смысла",
+                            links[:5],
+                        )
+
+                except Exception as e:
+                    last_error = e
+                    continue
+
+        if last_error:
+            return None, f"Ошибка поиска: {last_error}", []
+
+        return False, "✗ Не найдено даже упоминаний темы", []
 
     def check_refutations(self, query):
-        """Ищет статьи, опровергающие утверждение.
-
-        Результат используется только как подсказка:
-        автоматический вердикт ФЕЙК по нему не ставится.
-        """
+        """Ищет статьи, опровергающие утверждение."""
         refute_queries = [
             f"{query} опровержение",
             f"{query} фейк разоблачение",
@@ -455,10 +465,7 @@ class FactChecker:
             return False, f"Ошибка поиска опровержений: {e}", []
 
     def check_wikipedia_claim(self, text):
-        """Проверка короткого утверждения по Википедии.
-
-        Если все значимые слова утверждения найдены в статье — ПРАВДА.
-        """
+        """Проверка короткого утверждения по Википедии."""
         try:
             words = [
                 w for w in re.findall(r'[а-яё]+', text.lower())
@@ -547,7 +554,6 @@ class FactChecker:
             return None, f"Ошибка Wikipedia: {e}"
 
     def verify(self, text, theme=None):
-        # Если тема не выбрана пользователем — определяем автоматически
         if not theme or theme == 'авто':
             theme = self.detect_theme(text)
 
@@ -571,14 +577,11 @@ class FactChecker:
                 'model': model_result
             }
 
-        # ===== ML-МОДЕЛЬ =====
         model_result = self.check_model(text)
-
         entities = self.extract_entities(text)
 
         # ===== ВЕТКА: НЕТ СУЩНОСТЕЙ =====
         if not entities['persons'] and not entities['events'] and not entities['organizations']:
-            # 1. Проверка утверждения по Википедии
             wiki_claim = self.check_wikipedia_claim(text)
 
             if wiki_claim[0] is True:
@@ -607,11 +610,26 @@ class FactChecker:
                     'model': model_result
                 }
 
-            # 2. Поиск опровержений — только как подсказка, НЕ вердикт
             refute_result = self.check_refutations(text)
 
-            # 3. Обычный поиск упоминаний
             ddg_result = self.search_duckduckgo(text)
+
+            # RSS как резервный источник
+            if ddg_result[0] is None and (
+                "Ошибка поиска" in ddg_result[1]
+                or "Ничего не найдено" in ddg_result[1]
+            ):
+                rss_result = self.search_rss_news(text, theme)
+
+                if rss_result[0] is True:
+                    ddg_result = (
+                        None,
+                        rss_result[1] + ". Тема найдена в RSS, но утверждение требует проверки смысла",
+                        rss_result[2],
+                    )
+                elif rss_result[0] is None:
+                    ddg_result = rss_result
+
             links = ddg_result[2] if len(ddg_result) > 2 else []
 
             if refute_result[0]:
@@ -620,28 +638,31 @@ class FactChecker:
             reason = ddg_result[1]
 
             if refute_result[0]:
-                reason += f". {refute_result[1]}"
+                reason += f" {refute_result[1]}"
 
-            # Поиск недоступен или ничего не нашёл:
-            # нельзя автоматически считать текст фейком.
             search_failed = (
                 (
                     ddg_result[0] is None and
                     (
                         "Ошибка поиска" in ddg_result[1] or
-                        "Ничего не найдено" in ddg_result[1]
+                        "Ничего не найдено" in ddg_result[1] or
+                        "Ошибка RSS" in ddg_result[1]
                     )
                 ) or
                 (
                     ddg_result[0] is False and
-                    "Не найдено даже упоминаний" in ddg_result[1]
+                    (
+                        "Не найдено даже упоминаний" in ddg_result[1] or
+                        "Релевантных материалов не найдено" in ddg_result[1]
+                    )
                 )
             )
 
             if search_failed:
                 if model_result["confidence"] >= 0.75:
                     verdict = model_result["prediction"]
-                    confidence = model_result["confidence"]
+                    confidence = min(model_result["confidence"], 0.75)
+                    reason += " Внешняя проверка недоступна: вердикт основан только на ML-модели"
                 else:
                     verdict = "НЕИЗВЕСТНО"
                     confidence = 0.5
@@ -661,7 +682,7 @@ class FactChecker:
                 'confidence': confidence,
                 'details': [{
                     'fact': text,
-                    'source': 'DuckDuckGo',
+                    'source': 'DuckDuckGo / RSS',
                     'result': ddg_result[0],
                     'reason': reason,
                     'links': links
@@ -760,7 +781,6 @@ class FactChecker:
                         'links': links
                     })
 
-        # ===== ML-МОДЕЛЬ КАК ДОПОЛНИТЕЛЬНЫЙ ИСТОЧНИК =====
         results.append({
             'fact': 'ML-модель rubert-tiny2',
             'source': 'Локальная ML-модель',
