@@ -849,3 +849,130 @@ if __name__ == "__main__":
             f"| фейк {model.get('fake_probability', 0):.2f}",
             f"| правда {model.get('real_probability', 0):.2f}"
         )
+import json
+import re
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from peft import PeftModel
+
+QWEN_BASE = "unsloth/Qwen2.5-7B-Instruct-bnb-4bit"
+QWEN_LORA = "lastikfff/qwen2.5-7b-factchecker-lora"
+
+class QwenFactChecker:
+    def __init__(self):
+        self.model = None
+        self.tokenizer = None
+
+    def load(self):
+        if self.model is not None:
+            return
+
+        from transformers import BitsAndBytesConfig
+
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_quant_type="nf4",
+        )
+
+        self.tokenizer = AutoTokenizer.from_pretrained(QWEN_LORA)
+
+        base_model = AutoModelForCausalLM.from_pretrained(
+            QWEN_BASE,
+            quantization_config=quantization_config,
+            device_map="auto",
+        )
+
+        self.model = PeftModel.from_pretrained(
+            base_model,
+            QWEN_LORA,
+        )
+
+        self.model.eval()
+
+    def analyze(self, claim, sources, ml_hint="нет данных"):
+        self.load()
+
+        sources_text = "\n".join(
+            f"Источник {i}: {s}" for i, s in enumerate(sources, 1)
+        )
+
+        user_text = (
+            f"Утверждение: {claim}\n\n"
+            f"{sources_text}\n\n"
+            f"ML-модель: {ml_hint}"
+        )
+
+        messages = [
+            {
+                "role": "system",
+                "content": "Ты — фактчекер для русскоязычных новостей. Проанализируй утверждение и источники. Верни только валидный JSON без пояснений."
+            },
+            {
+                "role": "user",
+                "content": user_text
+            }
+        ]
+
+        inputs = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=True,
+            add_generation_prompt=True,
+            return_tensors="pt"
+        ).to(self.model.device)
+
+        attention_mask = (inputs != self.tokenizer.pad_token_id).long()
+
+        with torch.no_grad():
+            outputs = self.model.generate(
+                input_ids=inputs,
+                attention_mask=attention_mask,
+                max_new_tokens=256,
+                temperature=0.2,
+                do_sample=False,
+            )
+
+        text = self.tokenizer.decode(
+            outputs[0],
+            skip_special_tokens=True
+        )
+
+        return self._parse_json(text)
+
+    def _parse_json(self, text):
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+
+        if not match:
+            return {
+                "verdict": "НЕИЗВЕСТНО",
+                "confidence": 0.5,
+                "reason": "ИИ-модель не вернула корректный JSON.",
+                "sources_used": []
+            }
+
+        try:
+            data = json.loads(match.group())
+            verdict = data.get("verdict", "НЕИЗВЕСТНО")
+            confidence = float(data.get("confidence", 0.5))
+            reason = data.get("reason", "ИИ-анализ не дал объяснения.")
+            sources_used = data.get("sources_used", [])
+
+            if verdict not in ("ПРАВДА", "ФЕЙК", "НЕИЗВЕСТНО"):
+                verdict = "НЕИЗВЕСТНО"
+
+            confidence = max(0.0, min(1.0, confidence))
+
+            return {
+                "verdict": verdict,
+                "confidence": confidence,
+                "reason": reason,
+                "sources_used": sources_used
+            }
+
+        except Exception:
+            return {
+                "verdict": "НЕИЗВЕСТНО",
+                "confidence": 0.5,
+                "reason": "Не удалось разобрать ответ ИИ-модели.",
+                "sources_used": []
+            }
