@@ -10,3 +10,8 @@ feedparser
 transformers
 torch
 huggingface-hub
+transformers
+torch
+accelerate
+bitsandbytes
+peft
