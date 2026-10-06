@@ -349,12 +349,72 @@ if check_button or 'example' in st.session_state:
         st.markdown("---")
         st.subheader("🤖 ИИ-анализ Qwen")
 
-        if not QWEN_AVAILABLE or qwen_checker is None:
+st.markdown("---")
+st.subheader("🤖 ИИ-анализ Qwen")
+
+import os
+
+IS_STREAMLIT_CLOUD = os.environ.get("STREAMLIT_SHARING_MODE") == "1" or os.path.exists("/mount/src")
+
+if IS_STREAMLIT_CLOUD:
+    st.info(
+        "🤖 ИИ-анализ Qwen доступен только в локальной версии сайта.\n\n"
+        "Причина: Qwen2.5-7B требует GPU и больше памяти, чем доступно в Streamlit Cloud."
+    )
+elif not QWEN_AVAILABLE or qwen_checker is None:
+    st.warning(
+        "🤖 Qwen не подключён. Проверьте main_code.py и установленные зависимости."
+    )
+else:
+    if st.button("🧠 Запустить ИИ-анализ", use_container_width=True):
+        try:
+            with st.spinner("Qwen анализирует утверждение и источники..."):
+                sources = []
+
+                for detail in fact_result.get('details', []):
+                    source = detail.get('source', '')
+                    if source:
+                        sources.append(source)
+
+                if not sources:
+                    sources = ["Надёжные источники не найдены."]
+
+                if prediction is None:
+                    ml_hint = "нет данных"
+                else:
+                    label = "fake" if prediction == 0 else "real"
+                    ml_hint = f"style={confidence / 100:.2f} {label}"
+
+                qwen_result = qwen_checker.analyze(
+                    text_to_check,
+                    sources,
+                    ml_hint
+                )
+
+            if qwen_result['verdict'] == 'ПРАВДА':
+                st.success(
+                    f"✅ {qwen_result['verdict']} "
+                    f"({qwen_result['confidence']:.0%})"
+                )
+            elif qwen_result['verdict'] == 'ФЕЙК':
+                st.error(
+                    f"❌ {qwen_result['verdict']} "
+                    f"({qwen_result['confidence']:.0%})"
+                )
+            else:
+                st.warning(
+                    f"⚠️ {qwen_result['verdict']} "
+                    f"({qwen_result['confidence']:.0%})"
+                )
+
+            st.info(f"🧠 {qwen_result['reason']}")
+
+        except Exception as e:
             st.warning(
-                "🤖 ИИ-анализ Qwen недоступен на этом хостинге: "
-                "для модели требуется GPU и больше памяти."
+                "🤖 Qwen недоступен в облачной версии сайта. "
+                "Запустите приложение локально с GPU."
             )
-        elif st.button("🧠 Запустить ИИ-анализ", use_container_width=True):
+            st.caption(str(e))
             try:
                 with st.spinner("Qwen анализирует утверждение и источники..."):
                     sources = []
