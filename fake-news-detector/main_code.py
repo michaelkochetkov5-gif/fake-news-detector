@@ -849,12 +849,7 @@ if __name__ == "__main__":
             f"| фейк {model.get('fake_probability', 0):.2f}",
             f"| правда {model.get('real_probability', 0):.2f}"
         )
-import json
-import re
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft import PeftModel
-
+# ===== QWEN FACT CHECKER =====
 QWEN_BASE = "unsloth/Qwen2.5-7B-Instruct-bnb-4bit"
 QWEN_LORA = "lastikfff/qwen2.5-7b-factchecker-lora"
 
@@ -863,11 +858,32 @@ class QwenFactChecker:
         self.model = None
         self.tokenizer = None
 
+    def _check_dependencies(self):
+        try:
+            import torch
+            import peft
+            from transformers import AutoTokenizer, AutoModelForCausalLM
+            return True
+        except ImportError:
+            return False
+
     def load(self):
+        if not self._check_dependencies():
+            raise RuntimeError(
+                "Qwen недоступен: не установлены torch и peft "
+                "или недостаточно ресурсов для запуска 7B-модели."
+            )
+
         if self.model is not None:
             return
 
-        from transformers import BitsAndBytesConfig
+        import torch
+        from transformers import (
+            AutoTokenizer,
+            AutoModelForCausalLM,
+            BitsAndBytesConfig
+        )
+        from peft import PeftModel
 
         quantization_config = BitsAndBytesConfig(
             load_in_4bit=True,
@@ -893,8 +909,11 @@ class QwenFactChecker:
     def analyze(self, claim, sources, ml_hint="нет данных"):
         self.load()
 
+        import torch
+
         sources_text = "\n".join(
-            f"Источник {i}: {s}" for i, s in enumerate(sources, 1)
+            f"Источник {i}: {source}"
+            for i, source in enumerate(sources, 1)
         )
 
         user_text = (
@@ -906,7 +925,11 @@ class QwenFactChecker:
         messages = [
             {
                 "role": "system",
-                "content": "Ты — фактчекер для русскоязычных новостей. Проанализируй утверждение и источники. Верни только валидный JSON без пояснений."
+                "content": (
+                    "Ты — фактчекер для русскоязычных новостей. "
+                    "Проанализируй утверждение и источники. "
+                    "Верни только валидный JSON без пояснений."
+                )
             },
             {
                 "role": "user",
@@ -952,6 +975,7 @@ class QwenFactChecker:
 
         try:
             data = json.loads(match.group())
+
             verdict = data.get("verdict", "НЕИЗВЕСТНО")
             confidence = float(data.get("confidence", 0.5))
             reason = data.get("reason", "ИИ-анализ не дал объяснения.")
