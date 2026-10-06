@@ -10,7 +10,11 @@ import json
 from pathlib import Path
 
 # ===== ИНИЦИАЛИЗАЦИЯ ФАКТЧЕКЕРА =====
-fact_checker = FactChecker()
+@st.cache_resource
+def load_fact_checker():
+    return FactChecker()
+
+fact_checker = load_fact_checker()
 
 # ===== КЭШИРОВАНИЕ =====
 CACHE_FILE = "cache.json"
