@@ -3,27 +3,37 @@ import joblib
 import re
 import pandas as pd
 from pymorphy3 import MorphAnalyzer
-from main_code import FactChecker, QwenFactChecker
+from main_code import FactChecker
+
+try:
+    from main_code import QwenFactChecker
+    QWEN_AVAILABLE = True
+except Exception:
+    QwenFactChecker = None
+    QWEN_AVAILABLE = False
+
 from scipy.special import expit
 from datetime import datetime
 import json
 from pathlib import Path
 
-# ===== ИНИЦИАЛИЗАЦИЯ ФАКТЧЕКЕРА =====
+# ===== ФАКТЧЕКЕР =====
 @st.cache_resource
 def load_fact_checker():
     return FactChecker()
 
 fact_checker = load_fact_checker()
 
-# ===== ИНИЦИАЛИЗАЦИЯ QWEN =====
+# ===== QWEN =====
 @st.cache_resource
 def load_qwen_checker():
+    if QwenFactChecker is None:
+        return None
     return QwenFactChecker()
 
 qwen_checker = load_qwen_checker()
 
-# ===== КЭШИРОВАНИЕ =====
+# ===== КЭШ =====
 CACHE_FILE = "cache.json"
 
 def load_cache():
@@ -37,7 +47,7 @@ def save_cache(cache):
     with open(CACHE_FILE, 'w', encoding='utf-8') as f:
         json.dump(cache, f, ensure_ascii=False, indent=2, default=str)
 
-# ===== ЗАГРУЗКА МОДЕЛИ =====
+# ===== СТИЛЕВАЯ МОДЕЛЬ =====
 @st.cache_resource
 def load_style_model():
     try:
@@ -59,19 +69,19 @@ def clean_text(text):
     text = re.sub(r'#', '', text)
     text = re.sub(r'[^\w\s.,!?;:()\-\"]', '', text)
     text = re.sub(r'\s+', ' ', text).strip()
-    text = text.lower()
-    return text
+    return text.lower()
 
 def lemmatize_text(text):
     words = text.split()
     lemmas = []
+
     for word in words:
         if word.isalpha() and len(word) > 1:
             try:
-                normal_form = morph.parse(word)[0].normal_form
-                lemmas.append(normal_form)
-            except:
+                lemmas.append(morph.parse(word)[0].normal_form)
+            except Exception:
                 lemmas.append(word)
+
     return ' '.join(lemmas)
 
 def predict_fake(text):
@@ -95,6 +105,7 @@ def predict_fake(text):
 # ===== SESSION STATE =====
 if 'history' not in st.session_state:
     st.session_state.history = []
+
 if 'stats' not in st.session_state:
     st.session_state.stats = {
         'total': 0,
@@ -119,6 +130,7 @@ st.markdown("---")
 with st.sidebar:
     st.header("📈 Статистика")
     stats = st.session_state.stats
+
     st.metric("Всего проверок", stats['total'])
     st.metric("Фейков (стиль)", stats['fake_style'])
     st.metric("Правды (стиль)", stats['truth_style'])
@@ -126,6 +138,7 @@ with st.sidebar:
     st.metric("Правды (факты)", stats['truth_fact'])
 
     st.header("📜 История")
+
     if st.session_state.history:
         for i, item in enumerate(reversed(st.session_state.history[-10:]), 1):
             theme_emoji = {
@@ -133,14 +146,15 @@ with st.sidebar:
                 'it': '💻', 'игры': '🎮', 'кино': '🎬', 'музыка': '🎵',
                 'спорт': '⚽', 'путешествия': '✈️', 'факты': '🧠', 'общее': '📰'
             }
+
             theme = item.get('theme', 'общее')
             emoji = theme_emoji.get(theme, '📰')
-
             verdict_icon = "❌" if item['fact_verdict'] == 'ФЕЙК' else "✅"
             short_text = item['text'][:30] + "..." if len(item['text']) > 30 else item['text']
 
             if st.button(f"{emoji} {verdict_icon} {short_text}", key=f"hist_{i}"):
                 st.session_state['load_history'] = item
+
         st.session_state['load_history'] = None
     else:
         st.write("Пока нет проверок")
@@ -209,7 +223,11 @@ if st.session_state.get('load_history'):
     st.rerun()
 
 if check_button or 'example' in st.session_state:
-    text_to_check = st.session_state.get('example', user_input) if 'example' in st.session_state else user_input
+    text_to_check = (
+        st.session_state.get('example', user_input)
+        if 'example' in st.session_state
+        else user_input
+    )
 
     if text_to_check.strip() == "":
         st.warning("⚠️ Пожалуйста, введите текст!")
@@ -258,6 +276,7 @@ if check_button or 'example' in st.session_state:
 
         if theme not in st.session_state.stats['themes']:
             st.session_state.stats['themes'][theme] = 0
+
         st.session_state.stats['themes'][theme] += 1
 
         st.session_state.history.append({
@@ -326,11 +345,16 @@ if check_button or 'example' in st.session_state:
             else:
                 st.success(f"✅ ПРАВДА ({confidence:.1f}%)")
 
-        # ===== ИИ-АНАЛИЗ QWEN =====
+        # ===== QWEN =====
         st.markdown("---")
         st.subheader("🤖 ИИ-анализ Qwen")
 
-        if st.button("🧠 Запустить ИИ-анализ", use_container_width=True):
+        if not QWEN_AVAILABLE or qwen_checker is None:
+            st.warning(
+                "🤖 ИИ-анализ Qwen недоступен на этом хостинге: "
+                "для модели требуется GPU и больше памяти."
+            )
+        elif st.button("🧠 Запустить ИИ-анализ", use_container_width=True):
             try:
                 with st.spinner("Qwen анализирует утверждение и источники..."):
                     sources = []
@@ -375,10 +399,17 @@ if check_button or 'example' in st.session_state:
 
                 used = qwen_result.get('sources_used', [])
                 if used:
-                    st.caption(f"Использованные источники: {', '.join(map(str, used))}")
+                    st.caption(
+                        "Использованные источники: "
+                        + ", ".join(map(str, used))
+                    )
 
             except Exception as e:
-                st.error(f"Ошибка ИИ-анализа: {e}")
+                st.warning(
+                    "🤖 Qwen недоступен в облачной версии сайта. "
+                    "Запустите приложение локально с GPU для ИИ-анализа."
+                )
+                st.caption(str(e))
 
         # ===== ИТОГ =====
         st.markdown("---")
@@ -435,7 +466,12 @@ if check_button or 'example' in st.session_state:
         if fact_result.get('details'):
             with st.expander("🔍 Детали проверки фактов"):
                 for detail in fact_result['details']:
-                    icon = "✅" if detail['result'] is True else "❌" if detail['result'] is False else "⚠️"
+                    icon = (
+                        "✅" if detail['result'] is True
+                        else "❌" if detail['result'] is False
+                        else "⚠️"
+                    )
+
                     st.write(f"{icon} **{detail['fact']}**")
                     st.write(f"   *Источник:* {detail['source']}")
                     st.write(f"   *{detail['reason']}*")
