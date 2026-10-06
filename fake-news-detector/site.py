@@ -345,6 +345,10 @@ if check_button or 'example' in st.session_state:
         elif prediction is None:
             st.warning("⚠️ **НЕ УДАЛОСЬ НАДЁЖНО ПРОВЕРИТЬ** (короткое утверждение)")
             st.write(f"**Причина:** {fact_result['reason']}")
+        elif fact_result['verdict'] == 'НЕИЗВЕСТНО' and confidence < 70:
+            st.warning("⚠️ **НЕДОСТАТОЧНО ДАННЫХ ДЛЯ НАДЁЖНОГО ВЕРДИКТА**")
+            st.write(f"**Причина:** {fact_result['reason']}")
+            st.write(f"**Стилевая модель:** {'ФЕЙК' if prediction == 0 else 'ПРАВДА'} ({confidence:.1f}%) — только предварительная оценка")
         elif fact_result['verdict'] == 'НЕИЗВЕСТНО' and prediction == 0:
             st.error("❌ **Вероятно ФЕЙК** (стилевая модель)")
             st.write(f"**Уверенность:** {confidence:.1f}%")
