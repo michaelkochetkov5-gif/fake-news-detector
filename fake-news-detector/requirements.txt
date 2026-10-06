@@ -7,3 +7,6 @@ scipy
 ddgs
 wikipedia
 feedparser
+transformers
+torch
+huggingface-hub
