@@ -68,18 +68,21 @@ def lemmatize_text(text):
     return ' '.join(lemmas)
 
 def predict_fake(text):
+    if model is None or vectorizer is None:
+        return None, 0.0, ""
+
     cleaned = clean_text(text)
     lemmatized = lemmatize_text(cleaned)
     vectorized = vectorizer.transform([lemmatized])
     prediction = model.predict(vectorized)[0]
-    
+
     try:
         proba = model.predict_proba(vectorized)[0]
         confidence = max(proba) * 100
-    except:
+    except Exception:
         decision = model.decision_function(vectorized)[0]
         confidence = expit(decision) * 100
-    
+
     return prediction, confidence, lemmatized
 
 # ===== ИНИЦИАЛИЗАЦИЯ SESSION STATE =====
