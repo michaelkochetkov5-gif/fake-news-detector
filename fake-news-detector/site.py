@@ -32,12 +32,15 @@ def save_cache(cache):
 
 # ===== ЗАГРУЗКА МОДЕЛИ =====
 @st.cache_resource
-def load_model():
-    model = joblib.load('fake-news-detector/russian_fake_news_model_lemma_best.pkl')
-    vectorizer = joblib.load('fake-news-detector/russian_fake_news_vectorizer_lemma.pkl')
-    return model, vectorizer
+def load_style_model():
+    try:
+        model = joblib.load('fake-news-detector/russian_fake_news_model_lemma_best.pkl')
+        vectorizer = joblib.load('fake-news-detector/russian_fake_news_vectorizer_lemma.pkl')
+        return model, vectorizer
+    except (FileNotFoundError, OSError):
+        return None, None
 
-model, vectorizer = load_model()
+model, vectorizer = load_style_model()
 morph = MorphAnalyzer()
 
 # ===== ФУНКЦИИ =====
