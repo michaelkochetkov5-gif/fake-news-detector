@@ -1,1002 +1,395 @@
-from ddgs import DDGS
-import wikipedia
 import re
+import json
+import time
+import hashlib
+import requests
 import feedparser
-import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from datetime import datetime
+from duckduckgo_search import DDGS
 
-# ===== RSS ЛЕНТЫ =====
+# ===== НАСТРОЙКИ =====
+RSS_CACHE_TIME = 600  # секунд, 10 минут
+MAX_FEED_ARTICLES = 8
+FEED_TIMEOUT = 5
+
+STOP_WORDS = {
+    "это", "того", "которые", "который", "чтобы", "очень", "такой",
+    "такие", "будет", "будут", "есть", "быть", "можно", "нужно",
+    "говорят", "заявляют", "утверждают", "сообщают", "новости",
+    "случилось", "произошло", "сообщается", "сообщил", "заявил"
+}
+
 RSS_FEEDS = {
-    'lenta': 'https://lenta.ru/rss/news',
-    'ria': 'https://ria.ru/export/rss2/news/index.xml',
-    'tass': 'https://tass.ru/rss/v2.xml',
-    'meduza': 'https://meduza.io/rss/all',
-    'kommersant': 'https://www.kommersant.ru/RSS/news.xml',
-    'rbc': 'https://www.rbc.ru/rss/news.rss',
-    'vedomosti': 'https://www.vedomosti.ru/rss/news',
-    'interfax': 'https://www.interfax.ru/rss.asp',
-    'gazeta': 'https://www.gazeta.ru/export/rss/lenta.xml',
-    'izvestia': 'https://iz.ru/rss',
-    'rg': 'https://rg.ru/rss.xml',
-    'aif': 'https://aif.ru/rss/all',
-    'mk': 'https://www.mk.ru/rss/news/index.xml',
-    'kp': 'https://www.kp.ru/rss/all.xml',
-
-    'eda_ru': 'https://eda.ru/rss',
-    'povarenok': 'https://www.povarenok.ru/rss/',
-    'gastronom': 'https://www.gastronom.ru/xml/rss.xml',
-
-    'postupi_online': 'https://postupi.online/news/rss/',
-    'hse': 'https://www.hse.ru/news/rss/',
-    'mel': 'https://mel.fm/rss',
-
-    'habr': 'https://habr.com/ru/rss/',
-    'vc_ru': 'https://vc.ru/rss',
-    'tproger': 'https://tproger.ru/feed/',
-    'xakep': 'https://xakep.ru/feed/',
-    'opennet': 'https://www.opennet.ru/opennews/opennews_all.rss',
-
-    'nplus1': 'https://nplus1.ru/rss',
-    'elementy': 'https://elementy.ru/rss',
-    'indicator': 'https://indicator.ru/rss.xml',
-    'scientificrussia': 'https://scientificrussia.ru/feed',
-    'naked-science': 'https://naked-science.ru/rss',
-    'popmech': 'https://www.popmech.ru/rss/all.xml',
-
-    'dtf': 'https://dtf.ru/rss',
-    'kanobu': 'https://kanobu.ru/rss/',
-    'igromania': 'https://www.igromania.ru/rss/',
-    'stopgame': 'https://stopgame.ru/rss/data.rss',
-    'cybersport': 'https://www.cybersport.ru/rss/news.rss',
-
-    'sports': 'https://www.sports.ru/rss/',
-    'matchtv': 'https://matchtv.ru/rss',
-    'championat': 'https://www.championat.com/rss/news.xml',
-    'sovsport': 'https://www.sovsport.ru/rss/all.xml',
-
-    'vokrugsveta': 'https://www.vokrugsveta.ru/rss/',
-    'natgeo': 'https://www.national-geographic.ru/rss/',
-    'tonkosti': 'https://tonkosti.ru/rss',
-    'tourister': 'https://www.tourister.ru/rss/news',
-
-    'kinopoisk': 'https://www.kinopoisk.ru/rss/news/',
-    'film_ru': 'https://www.film.ru/rss/',
-    'afisha': 'https://www.afisha.ru/rss/news/',
-
-    'factroom': 'https://factroom.ru/feed',
-    'fishki': 'https://fishki.net/rss',
-    'adme': 'https://www.adme.ru/rss/',
-    'lifehacker': 'https://lifehacker.ru/feed/',
+    "общее": [
+        "https://lenta.ru/rss/news",
+        "https://ria.ru/export/rss2/archive/index.xml",
+        "https://tass.ru/rss/v2.xml",
+        "https://www.interfax.ru/rss.asp",
+        "https://www.kommersant.ru/RSS/news.xml",
+    ],
+    "наука": [
+        "https://nplus1.ru/rss",
+        "https://naked-science.ru/rss",
+        "https://www.popmech.ru/rss/all.xml",
+        "https://phys.org/rss-feed/",
+        "https://www.sciencedaily.com/rss/all.xml",
+    ],
+    "ии": [
+        "https://venturebeat.com/category/ai/feed/",
+        "https://techcrunch.com/category/artificial-intelligence/feed/",
+        "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
+        "https://habr.com/ru/rss/hubs/artificial_intelligence/?fl=ru",
+    ],
+    "it": [
+        "https://habr.com/ru/rss/hubs/programming/?fl=ru",
+        "https://habr.com/ru/rss/hubs/it/?fl=ru",
+        "https://techcrunch.com/feed/",
+        "https://www.theverge.com/rss/index.xml",
+        "https://arstechnica.com/feed/",
+    ],
+    "игры": [
+        "https://www.igromania.ru/rss/all.xml",
+        "https://stopgame.ru/rss/news.rss",
+        "https://www.ign.com/rss.xml",
+        "https://www.pcgamer.com/rss/",
+        "https://www.gamespot.com/feeds/news/",
+    ],
+    "кино": [
+        "https://www.kinopoisk.ru/rss/news.xml",
+        "https://www.film.ru/rss/news",
+        "https://variety.com/feed/",
+        "https://deadline.com/feed/",
+    ],
+    "музыка": [
+        "https://www.billboard.com/feed/",
+        "https://www.rollingstone.com/music/rss/",
+        "https://pitchfork.com/rss/news/",
+        "https://www.theguardian.com/music/rss",
+    ],
+    "спорт": [
+        "https://www.sports.ru/rss/all/news.xml",
+        "https://www.championat.com/rss/news.xml",
+        "https://www.eurosport.com/rss.xml",
+        "https://www.bbc.com/sport/rss.xml",
+    ],
+    "путешествия": [
+        "https://www.tourister.ru/rss/news",
+        "https://www.tourprom.ru/rss/news/",
+        "https://www.lonelyplanet.com/rss",
+        "https://www.theguardian.com/travel/rss",
+    ],
+    "еда": [
+        "https://www.gastronom.ru/text/rss",
+        "https://www.edimdoma.ru/news/rss",
+        "https://www.bbcgoodfood.com/rss.xml",
+        "https://www.healthline.com/nutrition/rss",
+    ],
+    "факты": [
+        "https://nplus1.ru/rss",
+        "https://naked-science.ru/rss",
+        "https://www.popmech.ru/rss/all.xml",
+        "https://www.bbc.com/russian/rss",
+    ],
+    "учёба": [
+        "https://www.gazeta.ru/education/rss.xml",
+        "https://tass.ru/rss/v2.xml",
+        "https://www.theguardian.com/education/rss",
+    ],
 }
 
-# ===== КЛЮЧЕВЫЕ СЛОВА ДЛЯ ТЕМ =====
 THEME_KEYWORDS = {
-    'еда': [
-        'рецепт', 'еда', 'продукт', 'питание', 'диета', 'кулинар', 'вкус', 'блюдо',
-        'калор', 'белок', 'жир', 'углевод', 'витами', 'минерал', 'полезн', 'вредн',
-        'сахар', 'соль', 'мясо', 'рыба', 'овощ', 'фрукт', 'молок', 'хлеб', 'вода',
-        'ресторан', 'кафе', 'доставк', 'меню', 'завтрак', 'обед', 'ужин'
-    ],
-    'учёба': [
-        'егэ', 'экзамен', 'университет', 'курс', 'образование', 'школа', 'студент',
-        'учеб', 'лекци', 'семинар', 'диплом', 'диссертац', 'наука', 'исследован',
-        'знани', 'умени', 'навык', 'тренинг', 'сертификат', 'степень',
-        'бакалавр', 'магистр', 'аспирант', 'доцент', 'профессор', 'преподават',
-        'олимпиада', 'конкурс', 'грант', 'стипендия', 'бюджет', 'платн'
-    ],
-    'ии': [
-        'нейросеть', 'chatgpt', 'искусственный интеллект', 'ai', 'алгоритм',
-        'машинное обучение', 'deep learning', 'neural network', 'трансформер',
-        'генеративн', 'gpt', 'языковая модель', 'llm', 'бот', 'чат',
-        'автоматизац', 'робот', 'компьютерное зрение', 'nlp', 'обработка текста',
-        'данные', 'big data', 'аналитика', 'предсказан', 'классификац',
-        'технолог', 'инноваци', 'стартап', 'цифров', 'виртуальн', 'дополненн'
-    ],
-    'наука': [
-        'наука', 'исследован', 'открыти', 'учён', 'лаборатор', 'эксперимент',
-        'физика', 'химия', 'биология', 'астроном', 'космос', 'планета', 'звезда',
-        'ген', 'днк', 'клетка', 'вирус', 'бактерия', 'эволюция', 'вид', 'организм',
-        'энергия', 'атом', 'молекула', 'частица', 'волна', 'излучение', 'поле'
-    ],
-    'it': [
-        'программ', 'код', 'разработк', 'язык программирован', 'python', 'java',
-        'сайт', 'приложение', 'софт', 'браузер', 'операционная система', 'windows',
-        'сервер', 'база данных', 'api', 'фреймворк', 'библиотека', 'github',
-        'кибербезопасност', 'вирус', 'взлом', 'пароль', 'шифрование'
-    ],
-    'игры': [
-        'игра', 'гейм', 'игрок', 'прохождени', 'уровень', 'босс', 'квест',
-        'playstation', 'xbox', 'nintendo', 'pc', 'steam', 'epic games',
-        'киберспорт', 'турнир', 'команда', 'чемпионат', 'призовые',
-        'minecraft', 'roblox', 'fortnite', 'gta', 'dota', 'cs'
-    ],
-    'кино': [
-        'фильм', 'кино', 'сериал', 'актёр', 'режиссёр', 'премьера', 'кинопоиск',
-        'оскар', 'премия', 'блокбастер', 'триллер', 'комедия', 'драма', 'ужасы',
-        'марвел', 'dc', 'киновселенная', 'экранизация', 'адаптац'
-    ],
-    'музыка': [
-        'музыка', 'альбом', 'трек', 'песня', 'исполнитель', 'группа', 'концерт',
-        'клип', 'сингл', 'чарт', 'хит', 'премьера', 'фестиваль', 'тур',
-        'рэп', 'хип-хоп', 'поп', 'рок', 'электронная', 'классическая', 'джаз'
-    ],
-    'спорт': [
-        'спорт', 'футбол', 'хоккей', 'баскетбол', 'теннис', 'бокс', 'mma',
-        'чемпионат', 'турнир', 'лига', 'кубок', 'медаль', 'золото', 'рекорд',
-        'команда', 'клуб', 'тренер', 'матч', 'игра', 'счёт', 'гол', 'победа'
-    ],
-    'путешествия': [
-        'путешеств', 'туризм', 'отдых', 'отель', 'билет', 'авиа', 'поезд',
-        'страна', 'город', 'курорт', 'пляж', 'море', 'горы', 'экскурсия',
-        'виза', 'паспорт', 'таможня', 'маршрут', 'путеводитель', 'достопримечательност'
-    ],
-    'факты': [
-        'интересн', 'удивительн', 'необычн', 'поража', 'шокирующ',
-        'факт', 'правда', 'оказывается', 'знаете ли вы', 'мало кто знает',
-        'топ', 'лучш', 'сам', 'рекорд', 'перв', 'последн'
-    ],
+    "еда": ["еда", "питание", "сахар", "кофе", "еда", "диета", "витамин",
+             "вакцина", "здоровье", "лекарство", "болезнь", "врач", "медицина"],
+    "учёба": ["школа", "школы", "егэ", "университет", "студент", "экзамен",
+               "учёба", "образование", "учитель", "домашнее задание"],
+    "ии": ["ии", "искусственный интеллект", "chatgpt", "нейросеть",
+            "нейросети", "робот", "роботы", "gpt", "gemini"],
+    "it": ["компьютер", "программирование", "python", "windows", "google",
+            "apple", "интернет", "сайт", "приложение", "технологии", "хакер"],
+    "игры": ["игра", "игры", "minecraft", "gta", "fortnite", "roblox",
+              "counter-strike", "киберспорт", "консоль", "steam"],
+    "кино": ["фильм", "фильмы", "кино", "сериал", "режиссёр", "актёр",
+              "оскар", "киностудия", "премьера"],
+    "музыка": ["музыка", "песня", "альбом", "концерт", "spotify",
+                "артист", "певец", "гитара", "фестиваль"],
+    "спорт": ["футбол", "спорт", "олимпиада", "матч", "чемпионат",
+               "спортсмен", "хоккей", "баскетбол", "тренер", "рекорд"],
+    "путешествия": ["путешествие", "туризм", "виза", "самолёт", "аэропорт",
+                     "отель", "паспорт", "граница", "поездка", "отпуск"],
+    "факты": ["наука", "учёные", "исследование", "земля", "космос",
+               "луна", "солнце", "днк", "физика", "химия", "биология"],
 }
 
-# ===== БАЗА ФАКТОВ =====
-QUICK_FACTS = {
-    'сахар вызывает зависимость сильнее кокаина': False,
-    'яблоки полезны для сердца': True,
-    'в макдоналдсе используют мясо червей': False,
-    'вода помогает похудеть': True,
-    'глютен вреден всем': False,
-    'егэ отменят в 2026': False,
-    'мгу входит в топ 100 университетов': True,
-    'ночью информация усваивается лучше': False,
-    'chatgpt заменит всех программистов': False,
-    'нейросети уже сознательные': False,
-    'ии не может чувствовать эмоции': True,
-    'gpt-4 понимает русский язык': True,
-    'minecraft самая продаваемая игра': True,
-    'киберспорт на олимпиаде': False,
-    'земля круглая': True,
-    'земля плоская': False,
-}
-
-STOP_WORDS = {'и', 'в', 'на', 'с', 'по', 'за', 'из', 'у', 'к', 'о', 'а', 'но',
-              'или', 'это', 'как', 'что', 'не', 'был', 'была', 'быть', 'есть'}
+# ===== КЭШ RSS =====
+rss_cache = {}
 
 
-class FactChecker:
-    def __init__(self):
-        wikipedia.set_lang("ru")
+def get_cache_key(text):
+    return hashlib.md5(text.encode("utf-8")).hexdigest()
 
-        # ===== ЛОКАЛЬНАЯ ML-МОДЕЛЬ =====
-        self.model_path = "lastikfff/fake-news-detector"
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
-        self.model = AutoModelForSequenceClassification.from_pretrained(self.model_path)
-        self.model.eval()
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model.to(self.device)
+def get_cached_rss(theme):
+    now = time.time()
+    cached = rss_cache.get(theme)
 
-    def detect_theme(self, text):
-        """Определяет тему по ключевым словам."""
-        text_lower = text.lower()
-        scores = {}
+    if cached and now - cached["time"] < RSS_CACHE_TIME:
+        return cached["articles"]
 
-        for theme, keywords in THEME_KEYWORDS.items():
-            score = 0
+    return None
 
-            for kw in keywords:
-                if len(kw) < 4:
-                    pattern = rf'\b{re.escape(kw)}\b'
-                else:
-                    pattern = rf'\b{re.escape(kw)}'
 
-                if re.search(pattern, text_lower):
-                    score += 1
+def save_rss_cache(theme, articles):
+    rss_cache[theme] = {
+        "time": time.time(),
+        "articles": articles
+    }
 
+
+# ===== ОПРЕДЕЛЕНИЕ ТЕМЫ =====
+def detect_theme(text, forced_theme="авто"):
+    if forced_theme != "авто":
+        return forced_theme
+
+    text_lower = text.lower()
+    scores = {}
+
+    for theme, keywords in THEME_KEYWORDS.items():
+        score = 0
+
+        for keyword in keywords:
+            if keyword in text_lower:
+                score += 1
+
+        if score > 0:
             scores[theme] = score
 
-        best_theme = max(scores, key=scores.get)
-
-        if scores[best_theme] > 0:
-            return best_theme
-
-        return 'общее'
-
-    def check_quick_facts(self, text):
-        text_lower = text.lower()
-
-        for fact, is_true in QUICK_FACTS.items():
-            if fact in text_lower:
-                if is_true:
-                    return True, f"✓ Подтверждено: {fact}"
-                else:
-                    return False, f"✗ ФЕЙК: {fact}"
-
-        return None, "Нет в базе быстрых фактов"
-
-    def check_model(self, text):
-        """Проверка текста локальной моделью.
-
-        Метки модели:
-        0 — фейк
-        1 — правда
-        """
-        try:
-            inputs = self.tokenizer(
-                text,
-                truncation=True,
-                max_length=256,
-                return_tensors="pt"
-            ).to(self.device)
-
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                probs = torch.softmax(outputs.logits, dim=-1)[0]
-
-            fake_probability = float(probs[0])
-            real_probability = float(probs[1])
-
-            if fake_probability > real_probability:
-                prediction = "ФЕЙК"
-            else:
-                prediction = "ПРАВДА"
-
-            return {
-                "fake_probability": fake_probability,
-                "real_probability": real_probability,
-                "prediction": prediction,
-                "confidence": max(fake_probability, real_probability)
-            }
-
-        except Exception as e:
-            return {
-                "fake_probability": 0.5,
-                "real_probability": 0.5,
-                "prediction": "НЕИЗВЕСТНО",
-                "confidence": 0.5,
-                "error": str(e)
-            }
-
-    def extract_entities(self, text):
-        entities = {
-            'persons': [], 'positions': [], 'countries': [],
-            'events': [], 'organizations': []
-        }
-
-        text_norm = text.strip()
-        if text_norm:
-            text_norm = text_norm[0].upper() + text_norm[1:]
-
-        pattern1 = r'([А-Яа-яЁё]+)\s+(президент|министр|глава|канцлер|директор)\s+([А-Яа-яЁё]+)'
-        matches1 = re.findall(pattern1, text_norm, re.IGNORECASE)
-        for match in matches1:
-            entities['persons'].append(match[0])
-            entities['positions'].append(match[1])
-            entities['countries'].append(match[2])
-
-        pattern2 = r'(взрыв|стрельба|атака|произошло|случилось)\s+(в|на)\s+([А-Я][а-я]+)'
-        matches2 = re.findall(pattern2, text, re.IGNORECASE)
-        for match in matches2:
-            entities['events'].append(match[0])
-            entities['countries'].append(match[2])
-
-        pattern3 = r'(компания|университет|школа|институт|организация)\s+([А-Я][а-я]+)'
-        matches3 = re.findall(pattern3, text, re.IGNORECASE)
-        for match in matches3:
-            entities['organizations'].append(match[1])
-
-        return entities
-
-    def get_rss_for_theme(self, theme):
-        if theme == 'еда':
-            return {k: v for k, v in RSS_FEEDS.items() if k in ['eda_ru', 'povarenok', 'gastronom']}
-        elif theme == 'учёба':
-            return {k: v for k, v in RSS_FEEDS.items() if k in ['postupi_online', 'hse', 'mel']}
-        elif theme == 'ии' or theme == 'it':
-            return {k: v for k, v in RSS_FEEDS.items() if k in ['habr', 'vc_ru', 'tproger', 'xakep', 'opennet']}
-        elif theme == 'наука':
-            return {k: v for k, v in RSS_FEEDS.items() if k in ['nplus1', 'elementy', 'indicator', 'scientificrussia', 'naked-science', 'popmech']}
-        elif theme == 'игры':
-            return {k: v for k, v in RSS_FEEDS.items() if k in ['dtf', 'kanobu', 'igromania', 'stopgame', 'cybersport']}
-        elif theme == 'спорт':
-            return {k: v for k, v in RSS_FEEDS.items() if k in ['sports', 'matchtv', 'championat', 'sovsport']}
-        elif theme == 'путешествия':
-            return {k: v for k, v in RSS_FEEDS.items() if k in ['vokrugsveta', 'natgeo', 'tonkosti', 'tourister']}
-        elif theme == 'кино':
-            return {k: v for k, v in RSS_FEEDS.items() if k in ['kinopoisk', 'film_ru', 'afisha']}
-        elif theme == 'факты':
-            return {k: v for k, v in RSS_FEEDS.items() if k in ['factroom', 'fishki', 'adme', 'lifehacker']}
-        else:
-            return RSS_FEEDS
-
-    def search_rss_news(self, query, theme='общее'):
-        try:
-            feeds = self.get_rss_for_theme(theme)
-            all_matches = []
-
-            words = [
-                w for w in re.findall(r"[а-яёa-z0-9]+", str(query).lower())
-                if len(w) >= 5
-            ]
-            words = list(dict.fromkeys(words))[:8]
-
-            if not words:
-                return None, "Не удалось выделить ключевые слова для поиска", []
-
-            for source, url in feeds.items():
-                try:
-                    feed = feedparser.parse(url, request_headers={
-                        "User-Agent": "Mozilla/5.0"
-                    })
-
-                    for entry in feed.entries[:30]:
-                        title = str(entry.get("title", "")).lower()
-                        summary = str(entry.get("summary", "")).lower()
-                        combined = title + " " + summary
-
-                        matches = sum(1 for word in words if word in combined)
-
-                        if matches >= 2:
-                            all_matches.append({
-                                "source": source,
-                                "title": entry.get("title", ""),
-                                "link": entry.get("link", ""),
-                                "published": entry.get("published", "N/A"),
-                                "matches": matches,
-                            })
-                except Exception:
-                    continue
-
-            all_matches.sort(key=lambda x: x["matches"], reverse=True)
-
-            if len(all_matches) >= 2:
-                return True, f"✓ Найдено {len(all_matches)} релевантных материалов", all_matches[:5]
-            if len(all_matches) == 1:
-                return None, "? Найден 1 релевантный материал", all_matches
-            return False, "✗ Релевантных материалов не найдено", []
-
-        except Exception as e:
-            return None, f"Ошибка RSS: {e}", []
-
-    def search_duckduckgo(self, query):
-        """Ищет упоминания через DuckDuckGo с сокращением запроса и повторами."""
-        query = " ".join(str(query).split())
-
-        search_query = query
-        if len(search_query) > 220:
-            search_query = search_query[:220].rsplit(" ", 1)[0]
-
-        attempts = [
-            search_query,
-            " ".join(search_query.split()[:18]),
-            " ".join(search_query.split()[:10]),
-        ]
-
-        last_error = None
-
-        for attempt_query in attempts:
-            for backend in ("auto", "html", "lite"):
-                try:
-                    with DDGS() as ddgs:
-                        results = list(
-                            ddgs.text(
-                                attempt_query,
-                                max_results=10,
-                                backend=backend,
-                            )
-                        )
-
-                    if not results:
-                        continue
-
-                    query_words = attempt_query.lower().split()
-                    matches = 0
-                    links = []
-
-                    for r in results:
-                        combined = (
-                            str(r.get("title", "")) + " " +
-                            str(r.get("body", ""))
-                        ).lower()
-
-                        if all(word in combined for word in query_words):
-                            matches += 1
-                            links.append(r.get("href", ""))
-
-                    links = [link for link in links if link]
-
-                    if matches >= 3:
-                        return (
-                            None,
-                            f"? Найдено {matches} упоминаний, требуется проверка смысла",
-                            links[:5],
-                        )
-                    if matches >= 1:
-                        return (
-                            None,
-                            f"? Найдено {matches} упоминание, требуется проверка смысла",
-                            links[:5],
-                        )
-
-                except Exception as e:
-                    last_error = e
-                    continue
-
-        if last_error:
-            return None, f"Ошибка поиска: {last_error}", []
-
-        return False, "✗ Не найдено даже упоминаний темы", []
-
-    def check_refutations(self, query):
-        """Ищет статьи, опровергающие утверждение."""
-        refute_queries = [
-            f"{query} опровержение",
-            f"{query} фейк разоблачение",
-            f"{query} это ложь",
-        ]
-
-        negation_words = ['не является', 'не был', 'опроверг', 'фейк', 'ложь',
-                          'неправда', 'миф', 'дезинформация', 'не соответствует']
-
-        refutations_found = 0
-        links = []
-
-        try:
-            with DDGS() as ddgs:
-                for rq in refute_queries:
-                    results = ddgs.text(rq, max_results=5)
-                    query_words = query.lower().split()
-
-                    for r in results:
-                        combined = (r['title'] + " " + r['body']).lower()
-
-                        topic_match = sum(1 for w in query_words if w in combined)
-                        has_negation = any(nw in combined for nw in negation_words)
-
-                        if topic_match >= 2 and has_negation:
-                            refutations_found += 1
-                            links.append(r['href'])
-
-            if refutations_found >= 2:
-                return True, f"Найдено {refutations_found} возможных опровержения — требуется проверка смысла", links[:5]
-            elif refutations_found == 1:
-                return True, "Найдено 1 возможное опровержение — требуется проверка смысла", links[:5]
-            return False, "Опровержений не найдено", []
-
-        except Exception as e:
-            return False, f"Ошибка поиска опровержений: {e}", []
-
-    def check_wikipedia_claim(self, text):
-        """Проверка короткого утверждения по Википедии."""
-        try:
-            words = [
-                w for w in re.findall(r'[а-яё]+', text.lower())
-                if w not in STOP_WORDS and len(w) > 2
-            ]
-
-            if not words:
-                return None, "Нет значимых слов для проверки"
-
-            search_results = wikipedia.search(text, results=3)
-
-            if not search_results:
-                return None, "Статья не найдена"
-
-            page = wikipedia.page(search_results[0], auto_suggest=False)
-            content = (page.summary + " " + page.content[:5000]).lower()
-
-            found = sum(1 for w in words if w[:5] in content)
-            ratio = found / len(words)
-
-            if ratio >= 0.99:
-                return True, f"✓ Утверждение согласуется со статьёй «{page.title}» (Википедия)"
-            elif ratio >= 0.5:
-                return None, f"? Тема найдена («{page.title}»), но утверждение требует проверки смысла"
-            else:
-                return None, f"? Тема найдена («{page.title}»), но утверждение не подтверждено напрямую"
-
-        except Exception as e:
-            return None, f"Ошибка Wikipedia: {e}"
-
-    def check_wikipedia(self, person=None, position=None, country=None, organization=None, query=None):
-        try:
-            search_query = person or organization or query
-
-            if not search_query:
-                return None, "Нет запроса для поиска"
-
-            search_results = wikipedia.search(search_query, results=3)
-
-            if not search_results:
-                return None, f"Не найдено статью о {search_query}"
-
-            page = wikipedia.page(search_results[0], auto_suggest=False)
-            content = page.content.lower()
-            summary = page.summary.lower()
-
-            if person and position and country:
-                position_lower = position.lower()
-                country_lower = country.lower()
-
-                if "президент" in position_lower:
-                    if country_lower == "россии" and "путин" in person.lower():
-                        if "президент россии" in content or "президент российской" in content:
-                            return True, "✓ Путин — президент России (Википедия)"
-                        elif "президент сша" in content:
-                            return False, "✗ Путин НЕ президент США (Википедия)"
-                    elif country_lower == "сша" and "путин" in person.lower():
-                        return False, "✗ Путин НЕ президент США (Википедия)"
-                    elif country_lower == "сша" and "трамп" in person.lower():
-                        if "президент сша" in content or "45-й президент" in content:
-                            return True, "✓ Трамп — президент США (Википедия)"
-
-            if position and country:
-                position_lower = position.lower()
-                country_lower = country.lower()
-
-                position_found = position_lower in content or position_lower in summary
-                country_found = country_lower in content or country_lower in summary
-
-                if position_found and country_found:
-                    return True, "✓ Подтверждено в Википедии"
-                elif position_found:
-                    return None, f"? {person} — {position} (страна неясна)"
-                else:
-                    return False, "✗ Не найдено в Википедии"
-
-            if organization:
-                if organization.lower() in content or organization.lower() in summary:
-                    return True, "✓ Найдено в Википедии"
-                else:
-                    return False, "✗ Не найдено в Википедии"
-
-            return True, "✓ Статья найдена в Википедии"
-
-        except Exception as e:
-            return None, f"Ошибка Wikipedia: {e}"
-
-    def verify(self, text, theme=None):
-        if not theme or theme == 'авто':
-            theme = self.detect_theme(text)
-
-        quick_result = self.check_quick_facts(text)
-
-        if quick_result[0] is not None:
-            model_result = self.check_model(text)
-
-            return {
-                'verdict': 'ФЕЙК' if not quick_result[0] else 'ПРАВДА',
-                'reason': quick_result[1],
-                'confidence': 1.0,
-                'details': [{
-                    'fact': text,
-                    'source': 'База фактов',
-                    'result': quick_result[0],
-                    'reason': quick_result[1],
-                    'links': []
-                }],
-                'theme': theme,
-                'model': model_result
-            }
-
-        model_result = self.check_model(text)
-        entities = self.extract_entities(text)
-
-        # ===== ВЕТКА: НЕТ СУЩНОСТЕЙ =====
-        if not entities['persons'] and not entities['events'] and not entities['organizations']:
-            wiki_claim = self.check_wikipedia_claim(text)
-
-            if wiki_claim[0] is True:
-                return {
-                    'verdict': 'ПРАВДА',
-                    'reason': wiki_claim[1],
-                    'confidence': 0.8,
-                    'details': [{
-                        'fact': text,
-                        'source': 'Википедия',
-                        'result': True,
-                        'reason': wiki_claim[1],
-                        'links': []
-                    }, {
-                        'fact': 'ML-модель rubert-tiny2',
-                        'source': 'Локальная ML-модель',
-                        'result': None if model_result['prediction'] == 'НЕИЗВЕСТНО' else (model_result['prediction'] == 'ПРАВДА'),
-                        'reason': (
-                            f"Модель: {model_result['prediction']} "
-                            f"(фейк: {model_result['fake_probability']:.2f}, "
-                            f"правда: {model_result['real_probability']:.2f})"
-                        ),
-                        'links': []
-                    }],
-                    'theme': theme,
-                    'model': model_result
-                }
-
-            refute_result = self.check_refutations(text)
-
-            ddg_result = self.search_duckduckgo(text)
-
-            # RSS как резервный источник
-            if ddg_result[0] is None and (
-                "Ошибка поиска" in ddg_result[1]
-                or "Ничего не найдено" in ddg_result[1]
-            ):
-                rss_result = self.search_rss_news(text, theme)
-
-                if rss_result[0] is True:
-                    ddg_result = (
-                        None,
-                        rss_result[1] + ". Тема найдена в RSS, но утверждение требует проверки смысла",
-                        rss_result[2],
-                    )
-                elif rss_result[0] is None:
-                    ddg_result = rss_result
-
-            links = ddg_result[2] if len(ddg_result) > 2 else []
-
-            if refute_result[0]:
-                links = list(dict.fromkeys(refute_result[2] + links))[:5]
-
-            reason = ddg_result[1]
-
-            if refute_result[0]:
-                reason += f" {refute_result[1]}"
-
-            search_failed = (
-                (
-                    ddg_result[0] is None and
-                    (
-                        "Ошибка поиска" in ddg_result[1] or
-                        "Ничего не найдено" in ddg_result[1] or
-                        "Ошибка RSS" in ddg_result[1]
-                    )
-                ) or
-                (
-                    ddg_result[0] is False and
-                    (
-                        "Не найдено даже упоминаний" in ddg_result[1] or
-                        "Релевантных материалов не найдено" in ddg_result[1]
-                    )
-                )
+    if not scores:
+        return "общее"
+
+    return max(scores, key=scores.get)
+
+
+# ===== ПОЛУЧЕНИЕ СТАТЕЙ ИЗ RSS =====
+def fetch_feed(feed_url):
+    try:
+        response = requests_get(feed_url)
+        feed = feedparser.parse(response.content)
+
+        articles = []
+
+        for entry in feed.entries[:30]:
+            articles.append({
+                "title": entry.get("title", ""),
+                "summary": entry.get("summary", ""),
+                "link": entry.get("link", ""),
+                "source": feed.feed.get("title", feed_url)
+            })
+
+        return articles
+
+    except Exception:
+        return []
+
+
+def requests_get(url):
+    import requests
+
+    return requests.get(url, timeout=FEED_TIMEOUT)
+
+
+def get_rss_articles(theme):
+    cached = get_cached_rss(theme)
+
+    if cached is not None:
+        return cached
+
+    feeds = RSS_FEEDS.get(theme, RSS_FEEDS["общее"])[:5]
+    articles = []
+
+    for feed_url in feeds:
+        articles.extend(fetch_feed(feed_url))
+
+    save_rss_cache(theme, articles)
+
+    return articles
+
+
+def get_relevant_articles(claim, theme, max_articles=MAX_FEED_ARTICLES):
+    articles = get_rss_articles(theme)
+
+    keywords = [
+        word for word in re.findall(r"[а-яёa-z]{4,}", claim.lower())
+        if word not in STOP_WORDS
+    ][:6]
+
+    relevant = []
+
+    for article in articles:
+        text = (article["title"] + " " + article["summary"]).lower()
+        score = sum(1 for keyword in keywords if keyword in text)
+
+        if score > 0:
+            article["score"] = score
+            relevant.append(article)
+
+    relevant.sort(key=lambda item: item["score"], reverse=True)
+
+    return relevant[:max_articles]
+
+
+# ===== ПОИСК DUCKDUCKGO =====
+def search_duckduckgo(claim, max_results=5):
+    results = []
+
+    try:
+        with DDGS() as ddgs:
+            search_results = ddgs.text(
+                claim,
+                max_results=max_results
             )
 
-            if search_failed:
-                if model_result["confidence"] >= 0.75:
-                    verdict = model_result["prediction"]
-                    confidence = min(model_result["confidence"], 0.75)
-                    reason += " Внешняя проверка недоступна: вердикт основан только на ML-модели"
-                else:
-                    verdict = "НЕИЗВЕСТНО"
-                    confidence = 0.5
-            else:
-                confidence = 0.5
-
-                if ddg_result[0] is None:
-                    verdict = "НЕИЗВЕСТНО"
-                elif ddg_result[0]:
-                    verdict = "ПРАВДА"
-                else:
-                    verdict = "ФЕЙК"
-
-            return {
-                'verdict': verdict,
-                'reason': reason,
-                'confidence': confidence,
-                'details': [{
-                    'fact': text,
-                    'source': 'DuckDuckGo / RSS',
-                    'result': ddg_result[0],
-                    'reason': reason,
-                    'links': links
-                }, {
-                    'fact': 'ML-модель rubert-tiny2',
-                    'source': 'Локальная ML-модель',
-                    'result': None if model_result['prediction'] == 'НЕИЗВЕСТНО' else (model_result['prediction'] == 'ПРАВДА'),
-                    'reason': (
-                        f"Модель: {model_result['prediction']} "
-                        f"(фейк: {model_result['fake_probability']:.2f}, "
-                        f"правда: {model_result['real_probability']:.2f})"
-                    ),
-                    'links': []
-                }],
-                'theme': theme,
-                'model': model_result
-            }
-
-        # ===== ВЕТКА: ЕСТЬ СУЩНОСТИ =====
-        results = []
-
-        for i, person in enumerate(entities['persons']):
-            position = entities['positions'][i] if i < len(entities['positions']) else ''
-            country = entities['countries'][i] if i < len(entities['countries']) else ''
-
-            wiki_result = self.check_wikipedia(person=person, position=position, country=country)
-
-            if wiki_result[0] is not None:
+            for result in search_results:
                 results.append({
-                    'fact': f"{person} — {position} {country}",
-                    'source': 'Википедия',
-                    'result': wiki_result[0],
-                    'reason': wiki_result[1],
-                    'links': [f"https://ru.wikipedia.org/wiki/{person}"]
-                })
-            else:
-                ddg_result = self.search_duckduckgo(f"{person} {position} {country}")
-                links = ddg_result[2] if len(ddg_result) > 2 else []
-
-                results.append({
-                    'fact': f"{person} — {position} {country}",
-                    'source': 'DuckDuckGo',
-                    'result': ddg_result[0],
-                    'reason': ddg_result[1],
-                    'links': links
+                    "title": result.get("title", ""),
+                    "body": result.get("body", ""),
+                    "href": result.get("href", "")
                 })
 
-        for org in entities['organizations']:
-            wiki_result = self.check_wikipedia(organization=org)
+    except Exception:
+        pass
 
-            if wiki_result[0] is not None:
+    return results
+
+
+# ===== ПОИСК WIKIPEDIA =====
+def search_wikipedia(claim, max_results=3):
+    results = []
+
+    try:
+        import wikipedia
+
+        search_results = wikipedia.search(claim, results=max_results)
+
+        for title in search_results:
+            try:
+                page = wikipedia.page(title, auto_suggest=False)
+
                 results.append({
-                    'fact': f"Организация: {org}",
-                    'source': 'Википедия',
-                    'result': wiki_result[0],
-                    'reason': wiki_result[1],
-                    'links': [f"https://ru.wikipedia.org/wiki/{org}"]
-                })
-            else:
-                ddg_result = self.search_duckduckgo(org)
-                links = ddg_result[2] if len(ddg_result) > 2 else []
-
-                results.append({
-                    'fact': f"Организация: {org}",
-                    'source': 'DuckDuckGo',
-                    'result': ddg_result[0],
-                    'reason': ddg_result[1],
-                    'links': links
+                    "title": page.title,
+                    "summary": page.summary[:700],
+                    "url": page.url
                 })
 
-        for event in entities['events']:
-            for country in entities['countries']:
-                query = f"{event} {country}"
+            except Exception:
+                continue
 
-                rss_result = self.search_rss_news(query, theme)
+    except Exception:
+        pass
 
-                if rss_result[0] is not None:
-                    links = [item['link'] for item in rss_result[2]] if len(rss_result) > 2 and rss_result[2] else []
-
-                    results.append({
-                        'fact': f"Событие: {event} в {country}",
-                        'source': 'RSS Новости',
-                        'result': rss_result[0],
-                        'reason': rss_result[1],
-                        'links': links
-                    })
-                else:
-                    ddg_result = self.search_duckduckgo(query)
-                    links = ddg_result[2] if len(ddg_result) > 2 else []
-
-                    results.append({
-                        'fact': f"Событие: {event} в {country}",
-                        'source': 'DuckDuckGo',
-                        'result': ddg_result[0],
-                        'reason': ddg_result[1],
-                        'links': links
-                    })
-
-        results.append({
-            'fact': 'ML-модель rubert-tiny2',
-            'source': 'Локальная ML-модель',
-            'result': None if model_result['prediction'] == 'НЕИЗВЕСТНО' else (model_result['prediction'] == 'ПРАВДА'),
-            'reason': (
-                f"Модель: {model_result['prediction']} "
-                f"(фейк: {model_result['fake_probability']:.2f}, "
-                f"правда: {model_result['real_probability']:.2f})"
-            ),
-            'links': []
-        })
-
-        true_count = sum(1 for r in results if r['result'] == True)
-        false_count = sum(1 for r in results if r['result'] == False)
-
-        if results:
-            sources_score = (true_count - false_count) / len(results)
-        else:
-            sources_score = 0
-
-        model_score = model_result['real_probability'] - model_result['fake_probability']
-        final_score = 0.7 * sources_score + 0.3 * model_score
-
-        if final_score >= 0.3:
-            verdict = 'ПРАВДА'
-            confidence = min(0.99, 0.5 + final_score / 2)
-        elif final_score <= -0.3:
-            verdict = 'ФЕЙК'
-            confidence = min(0.99, 0.5 - final_score / 2)
-        else:
-            verdict = 'НЕИЗВЕСТНО'
-            confidence = 0.5
-
-        return {
-            'verdict': verdict,
-            'reason': results[0]['reason'] if results else 'Нет данных',
-            'confidence': confidence,
-            'details': results,
-            'theme': theme,
-            'model': model_result
-        }
+    return results
 
 
-if __name__ == "__main__":
-    checker = FactChecker()
-
-    tests = [
-        "В НАТО составили наступательный план действий по захвату и оккупации Российской Федерации в случае начала военных действий против Украины. Отдельные части британских и американских войск совместно с солдатами Турции произведут высадку на побережье, чтобы открыть плацдарм для дальнейшего наступления.",
-        "Банк России снизил ключевую ставку. Регулятор отметил, что внешние условия для экономики остаются сложными, однако риски для финансовой стабильности перестали нарастать.",
-        "Учёные из университета сообщили об открытии нового метода лечения, который, по их словам, позволяет полностью вылечить все известные заболевания за одну неделю."
+# ===== ОЦЕНКА ПОДТВЕРЖДЕНИЯ =====
+def estimate_support(claim, sources):
+    claim_words = [
+        word for word in re.findall(r"[а-яёa-z]{4,}", claim.lower())
+        if word not in STOP_WORDS
     ]
 
-    for text in tests:
-        result = checker.verify(text)
+    if not claim_words:
+        return 0.0
 
-        print("\n" + "=" * 70)
-        print("Текст:", text[:120], "...")
-        print("Тема:", result["theme"])
-        print("Вердикт:", result["verdict"], f"({result['confidence']:.0%})")
-        print("Причина:", result["reason"])
+    supported = 0
 
-        model = result.get("model", {})
-        print(
-            "ML:",
-            model.get("prediction"),
-            f"| фейк {model.get('fake_probability', 0):.2f}",
-            f"| правда {model.get('real_probability', 0):.2f}"
-        )
-# ===== QWEN FACT CHECKER =====
-QWEN_BASE = "unsloth/Qwen2.5-7B-Instruct-bnb-4bit"
-QWEN_LORA = "lastikfff/qwen2.5-7b-factchecker-lora"
+    for source in sources:
+        text = (
+            source.get("title", "") + " " +
+            source.get("summary", "") + " " +
+            source.get("body", "")
+        ).lower()
 
-class QwenFactChecker:
-    def __init__(self):
-        self.model = None
-        self.tokenizer = None
+        matches = sum(1 for word in claim_words if word in text)
+        supported += matches
 
-    def _check_dependencies(self):
-        try:
-            import torch
-            import peft
-            from transformers import AutoTokenizer, AutoModelForCausalLM
-            return True
-        except ImportError:
-            return False
+    return min(supported / max(len(claim_words), 1), 1.0)
 
-    def load(self):
-        if not self._check_dependencies():
-            raise RuntimeError(
-                "Qwen недоступен: не установлены torch и peft "
-                "или недостаточно ресурсов для запуска 7B-модели."
+
+# ===== ГЛАВНЫЙ КЛАСС =====
+class FactChecker:
+    def verify(self, text, theme="авто"):
+        theme = detect_theme(text, theme)
+
+        duckduckgo_results = search_duckduckgo(text)
+        wikipedia_results = search_wikipedia(text)
+        rss_results = get_relevant_articles(text, theme)
+
+        all_sources = []
+
+        for result in duckduckgo_results:
+            all_sources.append({
+                "title": result["title"],
+                "summary": result["body"],
+                "url": result["href"],
+                "source": "DuckDuckGo"
+            })
+
+        for result in wikipedia_results:
+            all_sources.append({
+                "title": result["title"],
+                "summary": result["summary"],
+                "url": result["url"],
+                "source": "Wikipedia"
+            })
+
+        for result in rss_results:
+            all_sources.append({
+                "title": result["title"],
+                "summary": result["summary"],
+                "url": result["link"],
+                "source": result["source"]
+            })
+
+        support = estimate_support(text, all_sources)
+
+        details = []
+
+        for source in all_sources[:8]:
+            details.append({
+                "fact": source["title"],
+                "source": source["source"],
+                "reason": "Найден потенциально релевантный источник.",
+                "links": [source["url"]] if source["url"] else [],
+                "result": None
+            })
+
+        if support >= 0.7 and len(all_sources) >= 3:
+            verdict = "ПРАВДА"
+            confidence = min(0.55 + support * 0.35, 0.92)
+            reason = (
+                "Найдено несколько релевантных источников, "
+                "подтверждающих основные слова утверждения."
             )
 
-        if self.model is not None:
-            return
-
-        import torch
-        from transformers import (
-            AutoTokenizer,
-            AutoModelForCausalLM,
-            BitsAndBytesConfig
-        )
-        from peft import PeftModel
-
-        quantization_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_compute_dtype=torch.float16,
-            bnb_4bit_quant_type="nf4",
-        )
-
-        self.tokenizer = AutoTokenizer.from_pretrained(QWEN_LORA)
-
-        base_model = AutoModelForCausalLM.from_pretrained(
-            QWEN_BASE,
-            quantization_config=quantization_config,
-            device_map="auto",
-        )
-
-        self.model = PeftModel.from_pretrained(
-            base_model,
-            QWEN_LORA,
-        )
-
-        self.model.eval()
-
-    def analyze(self, claim, sources, ml_hint="нет данных"):
-        self.load()
-
-        import torch
-
-        sources_text = "\n".join(
-            f"Источник {i}: {source}"
-            for i, source in enumerate(sources, 1)
-        )
-
-        user_text = (
-            f"Утверждение: {claim}\n\n"
-            f"{sources_text}\n\n"
-            f"ML-модель: {ml_hint}"
-        )
-
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "Ты — фактчекер для русскоязычных новостей. "
-                    "Проанализируй утверждение и источники. "
-                    "Верни только валидный JSON без пояснений."
-                )
-            },
-            {
-                "role": "user",
-                "content": user_text
-            }
-        ]
-
-        inputs = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=True,
-            add_generation_prompt=True,
-            return_tensors="pt"
-        ).to(self.model.device)
-
-        attention_mask = (inputs != self.tokenizer.pad_token_id).long()
-
-        with torch.no_grad():
-            outputs = self.model.generate(
-                input_ids=inputs,
-                attention_mask=attention_mask,
-                max_new_tokens=256,
-                temperature=0.2,
-                do_sample=False,
+        elif support <= 0.2 and len(all_sources) >= 3:
+            verdict = "ФЕЙК"
+            confidence = min(0.55 + (1 - support) * 0.3, 0.88)
+            reason = (
+                "Релевантные источники не подтверждают утверждение "
+                "или противоречат его основной мысли."
             )
 
-        text = self.tokenizer.decode(
-            outputs[0],
-            skip_special_tokens=True
-        )
+        else:
+            verdict = "НЕИЗВЕСТНО"
+            confidence = 0.5
+            reason = (
+                "Найденных источников недостаточно или они лишь косвенно "
+                "связаны с утверждением."
+            )
 
-        return self._parse_json(text)
-
-    def _parse_json(self, text):
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-
-        if not match:
-            return {
-                "verdict": "НЕИЗВЕСТНО",
-                "confidence": 0.5,
-                "reason": "ИИ-модель не вернула корректный JSON.",
-                "sources_used": []
-            }
-
-        try:
-            data = json.loads(match.group())
-
-            verdict = data.get("verdict", "НЕИЗВЕСТНО")
-            confidence = float(data.get("confidence", 0.5))
-            reason = data.get("reason", "ИИ-анализ не дал объяснения.")
-            sources_used = data.get("sources_used", [])
-
-            if verdict not in ("ПРАВДА", "ФЕЙК", "НЕИЗВЕСТНО"):
-                verdict = "НЕИЗВЕСТНО"
-
-            confidence = max(0.0, min(1.0, confidence))
-
-            return {
-                "verdict": verdict,
-                "confidence": confidence,
-                "reason": reason,
-                "sources_used": sources_used
-            }
-
-        except Exception:
-            return {
-                "verdict": "НЕИЗВЕСТНО",
-                "confidence": 0.5,
-                "reason": "Не удалось разобрать ответ ИИ-модели.",
-                "sources_used": []
-            }
+        return {
+            "verdict": verdict,
+            "confidence": confidence,
+            "reason": reason,
+            "theme": theme,
+            "details": details
+        }
