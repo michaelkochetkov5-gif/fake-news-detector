@@ -1,194 +1,116 @@
-import re
-import time
-import hashlib
+import streamlit as st
 import requests
 import feedparser
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import re
+import json
+import os
+import time
+from datetime import datetime, timedelta
+from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
 
-RSS_CACHE_TIME = 600
-SEARCH_CACHE_TIME = 600
-MAX_FEED_ARTICLES = 8
-FEED_TIMEOUT = 5
-MAX_WORKERS = 8
+try:
+    import wikipedia
+except ImportError:
+    wikipedia = None
+
+CACHE_FILE = "cache.json"
+
+if os.path.exists(CACHE_FILE):
+    try:
+        with open(CACHE_FILE, "r", encoding="utf-8") as file:
+            cache = json.load(file)
+    except Exception:
+        cache = {}
+else:
+    cache = {}
+
+search_cache = cache.get("search_cache", {})
+news_cache = cache.get("news_cache", {})
+
+def save_cache():
+    try:
+        with open(CACHE_FILE, "w", encoding="utf-8") as file:
+            json.dump(
+                {
+                    "search_cache": search_cache,
+                    "news_cache": news_cache
+                },
+                file,
+                ensure_ascii=False,
+                indent=2
+            )
+    except Exception:
+        pass
+
+def get_cache_key(text):
+    return re.sub(r"[^a-zа-яё0-9]+", "_", text.lower()).strip("_")
 
 STOP_WORDS = {
-    "это", "того", "которые", "который", "чтобы", "очень", "такой",
-    "такие", "будет", "будут", "есть", "быть", "можно", "нужно",
-    "говорят", "заявляют", "утверждают", "сообщают", "новости",
-    "случилось", "произошло", "сообщается", "сообщил", "заявил"
+    "это", "этот", "эта", "эти", "того", "того", "такой", "такая",
+    "такие", "есть", "был", "была", "были", "будет", "будут",
+    "очень", "более", "менее", "самый", "самая", "самые",
+    "который", "которая", "которые", "чтобы", "потому", "поэтому",
+    "также", "тоже", "вот", "там", "тут", "или", "и", "а", "но",
+    "не", "ни", "да", "нет", "как", "что", "чем", "при", "для",
+    "от", "до", "из", "по", "за", "на", "в", "во", "со", "с", "у",
+    "о", "об", "обо", "над", "под", "про", "через", "между"
 }
 
 SYNONYMS = {
-    "круглая": ["круглая", "шарообразная", "форме шара", "сферическая"],
-    "шарообразная": ["круглая", "шарообразная", "форме шара", "сферическая"],
-    "вреден": ["вреден", "вредна", "вредно", "опасен", "опасна", "опасно"],
-    "опасен": ["вреден", "вредна", "вредно", "опасен", "опасна", "опасно"],
-    "вызывает": ["вызывает", "приводит", "связан", "связана", "влияет"],
-    "лечит": ["лечит", "помогает", "эффективен", "эффективна"],
-    "запретят": ["запретят", "запрет", "запрещён", "запрещено"],
-    "отменят": ["отменят", "отмена", "отменён", "отменено"],
-    "земля": ["земля", "планета земля", "наша планета"],
-    "ии": ["ии", "искусственный интеллект", "нейросеть", "нейросети"],
-    "игры": ["игра", "игры", "геймер", "киберспорт"],
-    "спорт": ["спорт", "футбол", "матч", "олимпиада", "спортсмен"]
+    "круглая": [
+        "круглая", "шарообразная", "форме шара",
+        "сферическая", "геоид", "эллипсоид"
+    ],
+    "шара": [
+        "шара", "шарообразная", "круглая",
+        "сферическая", "геоид", "эллипсоид"
+    ],
+    "форма": [
+        "форма", "форме", "формы", "имеет форму"
+    ],
+    "вреден": [
+        "вреден", "вредна", "вредно", "опасен", "опасна", "опасно"
+    ],
+    "опасен": [
+        "вреден", "вредна", "вредно", "опасен", "опасна", "опасно"
+    ],
+    "вызывает": [
+        "вызывает", "приводит", "связан", "связана", "влияет"
+    ],
+    "лечит": [
+        "лечит", "помогает", "эффективен", "эффективна"
+    ],
+    "запретят": [
+        "запретят", "запрет", "запрещён", "запрещено"
+    ],
+    "отменят": [
+        "отменят", "отмена", "отменён", "отменено"
+    ],
+    "земля": [
+        "земля", "планета земля", "наша планета"
+    ]
 }
 
-RSS_FEEDS = [
-    "https://lenta.ru/rss/news",
-    "https://ria.ru/export/rss2/archive/index.xml",
-    "https://tass.ru/rss/v2.xml",
-    "https://www.interfax.ru/rss.asp",
-    "https://www.kommersant.ru/RSS/news.xml",
-    "https://nplus1.ru/rss",
-    "https://naked-science.ru/rss",
-    "https://www.popmech.ru/rss/all.xml",
-    "https://phys.org/rss-feed/",
-    "https://www.sciencedaily.com/rss/all.xml",
-    "https://venturebeat.com/category/ai/feed/",
-    "https://techcrunch.com/category/artificial-intelligence/feed/",
-    "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
-    "https://habr.com/ru/rss/hubs/artificial_intelligence/?fl=ru",
-    "https://habr.com/ru/rss/hubs/programming/?fl=ru",
-    "https://www.igromania.ru/rss/all.xml",
-    "https://stopgame.ru/rss/news.rss",
-    "https://www.ign.com/rss.xml",
-    "https://www.pcgamer.com/rss/",
-    "https://www.kinopoisk.ru/rss/news.xml",
-    "https://www.film.ru/rss/news",
-    "https://www.billboard.com/feed/",
-    "https://www.rollingstone.com/music/rss/",
-    "https://www.sports.ru/rss/all/news.xml",
-    "https://www.championat.com/rss/news.xml",
-    "https://www.eurosport.com/rss.xml",
-    "https://www.tourister.ru/rss/news",
-    "https://www.gastronom.ru/text/rss",
-    "https://www.healthline.com/nutrition/rss",
-    "https://www.bbc.com/russian/rss",
-]
-
-RELIABLE_DOMAINS = [
-    "wikipedia.org",
-    "nplus1.ru",
-    "naked-science.ru",
-    "phys.org",
-    "sciencedaily.com",
-    "nature.com",
-    "who.int",
-    "cdc.gov",
-    "nasa.gov",
-    "tass.ru",
-    "ria.ru",
-    "interfax.ru",
-    "bbc.com",
-    "reuters.com"
-]
-
-rss_cache = {
-    "articles": [],
-    "time": 0
-}
-
-search_cache = {}
-
-
-def get_cache_key(text):
-    return hashlib.md5(text.encode("utf-8")).hexdigest()
-
-
-def expand_keywords(keywords):
+def expand_keywords(words):
     expanded = []
 
-    for keyword in keywords:
-        expanded.append(keyword)
+    for word in words:
+        expanded.append(word)
 
-        for synonym in SYNONYMS.get(keyword, []):
-            expanded.append(synonym)
+        if word in SYNONYMS:
+            expanded.extend(SYNONYMS[word])
 
     return list(dict.fromkeys(expanded))
 
+def clean_text(text):
+    if not text:
+        return ""
 
-def fetch_feed(feed_url):
-    try:
-        response = requests.get(feed_url, timeout=FEED_TIMEOUT)
-        feed = feedparser.parse(response.content)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text)
 
-        articles = []
-
-        for entry in feed.entries[:25]:
-            articles.append({
-                "title": entry.get("title", ""),
-                "summary": entry.get("summary", ""),
-                "link": entry.get("link", ""),
-                "source": feed.feed.get("title", feed_url)
-            })
-
-        return articles
-
-    except Exception:
-        return []
-
-
-def update_rss_cache():
-    global rss_cache
-
-    now = time.time()
-
-    if now - rss_cache["time"] < RSS_CACHE_TIME and rss_cache["articles"]:
-        return rss_cache["articles"]
-
-    articles = []
-
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = [
-            executor.submit(fetch_feed, feed_url)
-            for feed_url in RSS_FEEDS
-        ]
-
-        for future in as_completed(futures):
-            try:
-                articles.extend(future.result())
-            except Exception:
-                continue
-
-    rss_cache["articles"] = articles
-    rss_cache["time"] = now
-
-    return articles
-
-
-def get_relevant_articles(claim, max_articles=MAX_FEED_ARTICLES):
-    articles = update_rss_cache()
-
-    keywords = [
-        word for word in re.findall(r"[а-яёa-z]{4,}", claim.lower())
-        if word not in STOP_WORDS
-    ][:6]
-
-    keywords = expand_keywords(keywords)
-
-    relevant = []
-
-    for article in articles:
-        text = (
-            article["title"] + " " +
-            article["summary"]
-        ).lower()
-
-        score = 0
-
-        for keyword in keywords:
-            if keyword in text:
-                score += 1
-
-        if score > 0:
-            article["score"] = score
-            relevant.append(article)
-
-    relevant.sort(key=lambda item: item["score"], reverse=True)
-
-    return relevant[:max_articles]
-
+    return text.strip()
 
 def search_duckduckgo(claim, max_results=5):
     cache_key = "ddg_" + get_cache_key(claim)
@@ -202,14 +124,16 @@ def search_duckduckgo(claim, max_results=5):
         with DDGS() as ddgs:
             search_results = ddgs.text(
                 claim,
+                region="ru-ru",
+                safesearch="moderate",
                 max_results=max_results
             )
 
             for result in search_results:
                 results.append({
                     "title": result.get("title", ""),
-                    "summary": result.get("body", ""),
-                    "body": result.get("body", ""),
+                    "summary": clean_text(result.get("body", "")),
+                    "body": clean_text(result.get("body", "")),
                     "url": result.get("href", ""),
                     "source": "DuckDuckGo"
                 })
@@ -218,9 +142,9 @@ def search_duckduckgo(claim, max_results=5):
         pass
 
     search_cache[cache_key] = results
+    save_cache()
 
     return results
-
 
 def search_wikipedia(claim, max_results=3):
     cache_key = "wiki_" + get_cache_key(claim)
@@ -240,42 +164,42 @@ def search_wikipedia(claim, max_results=3):
     if "круглая" in claim_lower or "шара" in claim_lower:
         queries.append("Форма Земли")
 
-    try:
-        import wikipedia
+    if wikipedia:
+        try:
+            wikipedia.set_lang("ru")
 
-        for query in queries:
-            try:
-                search_results = wikipedia.search(
-                    query,
-                    results=max_results
-                )
+            for query in queries:
+                try:
+                    search_results = wikipedia.search(
+                        query,
+                        results=max_results
+                    )
 
-                for title in search_results:
-                    try:
-                        page = wikipedia.page(
-                            title,
-                            auto_suggest=False
-                        )
+                    for title in search_results:
+                        try:
+                            page = wikipedia.page(
+                                title,
+                                auto_suggest=False
+                            )
 
-                        results.append({
-                            "title": page.title,
-                            "summary": page.summary,
-                            "body": page.summary,
-                            "url": page.url,
-                            "source": "Wikipedia"
-                        })
+                            results.append({
+                                "title": page.title,
+                                "summary": page.summary,
+                                "body": page.summary,
+                                "url": page.url,
+                                "source": "Wikipedia"
+                            })
 
-                    except Exception:
-                        continue
+                        except Exception:
+                            continue
 
-            except Exception:
-                continue
+                except Exception:
+                    continue
 
-    except Exception:
-        pass
+        except Exception:
+            pass
 
     unique_results = []
-
     seen_urls = set()
 
     for result in results:
@@ -284,9 +208,93 @@ def search_wikipedia(claim, max_results=3):
             unique_results.append(result)
 
     search_cache[cache_key] = unique_results
+    save_cache()
 
     return unique_results
 
+RSS_FEEDS = [
+    {
+        "name": "РИА Новости",
+        "url": "https://ria.ru/export/rss2/archive/index.xml"
+    },
+    {
+        "name": "ТАСС",
+        "url": "https://tass.ru/rss/v2.xml"
+    },
+    {
+        "name": "Интерфакс",
+        "url": "https://www.interfax.ru/rss.asp"
+    },
+    {
+        "name": "Lenta.ru",
+        "url": "https://lenta.ru/rss/news"
+    },
+    {
+        "name": "BBC Russian",
+        "url": "https://feeds.bbci.co.uk/russian/rss.xml"
+    }
+]
+
+def get_relevant_articles(claim, max_articles=5):
+    cache_key = "news_" + get_cache_key(claim)
+
+    current_time = time.time()
+
+    if cache_key in news_cache:
+        cached = news_cache[cache_key]
+
+        if current_time - cached.get("time", 0) < 3600:
+            return cached.get("articles", [])
+
+    claim_words = [
+        word for word in re.findall(r"[а-яёa-z]{4,}", claim.lower())
+        if word not in STOP_WORDS
+    ]
+
+    claim_words = expand_keywords(claim_words)
+
+    articles = []
+
+    for feed in RSS_FEEDS:
+        try:
+            parsed_feed = feedparser.parse(feed["url"])
+
+            for entry in parsed_feed.entries[:30]:
+                title = clean_text(entry.get("title", ""))
+                summary = clean_text(entry.get("summary", ""))
+
+                text = (title + " " + summary).lower()
+
+                matches = [
+                    word for word in claim_words
+                    if word in text
+                ]
+
+                if matches:
+                    articles.append({
+                        "title": title,
+                        "summary": summary,
+                        "link": entry.get("link", ""),
+                        "source": feed["name"],
+                        "published": entry.get("published", ""),
+                        "matches": len(matches)
+                    })
+
+        except Exception:
+            continue
+
+    articles.sort(key=lambda item: item["matches"], reverse=True)
+
+    articles = articles[:max_articles]
+
+    news_cache[cache_key] = {
+        "time": current_time,
+        "articles": articles
+    }
+
+    save_cache()
+
+    return articles
 
 def extract_matching_sentences(claim, text):
     sentences = re.split(r"(?<=[.!?])\s+", text)
@@ -314,15 +322,14 @@ def extract_matching_sentences(claim, text):
             if word in sentence_lower:
                 matched_words.append(word)
 
-        if len(matched_words) == 0:
-            continue
-
         coverage = len(matched_words) / max(len(claim_words), 1)
 
         if coverage >= 0.4:
             status = "подтверждает"
-        elif coverage >= 0.2:
+        elif coverage >= 0.15:
             status = "косвенно подтверждает"
+        elif coverage > 0:
+            status = "связан с темой утверждения"
         else:
             continue
 
@@ -335,7 +342,6 @@ def extract_matching_sentences(claim, text):
     matches.sort(key=lambda item: item["coverage"], reverse=True)
 
     return matches[:2]
-
 
 def estimate_support(claim, sources):
     claim_words = [
@@ -361,18 +367,6 @@ def estimate_support(claim, sources):
         if matches:
             best = matches[0]
 
-            domain_weight = 1.0
-
-            for domain in RELIABLE_DOMAINS:
-                if domain in source.get("url", ""):
-                    domain_weight = 1.3
-                    break
-
-            if best["status"] == "подтверждает":
-                support_score += 1.0 * domain_weight
-            else:
-                support_score += 0.5 * domain_weight
-
             evidence.append({
                 "title": source.get("title", ""),
                 "url": source.get("url", ""),
@@ -381,6 +375,13 @@ def estimate_support(claim, sources):
                 "status": best["status"],
                 "coverage": best["coverage"]
             })
+
+            if best["status"] == "подтверждает":
+                support_score += 1.0
+            elif best["status"] == "косвенно подтверждает":
+                support_score += 0.5
+            else:
+                support_score += 0.2
 
     support_score = min(
         support_score / max(len(claim_words), 1),
@@ -394,8 +395,17 @@ def estimate_support(claim, sources):
 
     return support_score, evidence
 
-
 class FactChecker:
+    def check_fact(self, text):
+        result = self.verify(text)
+
+        return {
+            "label": result["verdict"],
+            "score": result["confidence"],
+            "details": result["details"],
+            "explanation": result["reason"]
+        }
+
     def verify(self, text):
         duckduckgo_results = search_duckduckgo(text)
         wikipedia_results = search_wikipedia(text)
@@ -438,6 +448,37 @@ class FactChecker:
                 )
             })
 
+        if not details:
+            for source in all_sources[:8]:
+                sentences = re.split(
+                    r"(?<=[.!?])\s+",
+                    (
+                        source.get("summary", "") + " " +
+                        source.get("body", "")
+                    ).strip()
+                )
+
+                sentence = ""
+
+                for sentence_candidate in sentences:
+                    if len(sentence_candidate.strip()) > 40:
+                        sentence = sentence_candidate.strip()
+                        break
+
+                if not sentence:
+                    sentence = source.get("title", "")
+
+                details.append({
+                    "fact": source.get("title", ""),
+                    "source": source.get("source", ""),
+                    "reason": (
+                        f"Источник связан с темой утверждения: "
+                        f"«{sentence}»"
+                    ),
+                    "links": [source.get("url", "")] if source.get("url") else [],
+                    "result": None
+                })
+
         if support >= 0.7 and len(evidence) >= 2:
             verdict = "ПРАВДА"
             confidence = min(0.55 + support * 0.35, 0.92)
@@ -458,8 +499,8 @@ class FactChecker:
             verdict = "НЕИЗВЕСТНО"
             confidence = 0.5
             reason = (
-                "Найденных подтверждающих источников недостаточно "
-                "или они лишь косвенно связаны с утверждением."
+                "Найдены источники по теме, но их недостаточно "
+                "для надёжного подтверждения или опровержения."
             )
 
         return {
