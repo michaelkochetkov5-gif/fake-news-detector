@@ -154,20 +154,17 @@ with st.sidebar:
 
     st.header("📝 Примеры")
     st.markdown("""
+    **🔬 Наука:**  
+    - Земля круглая
+
     **🍕 Еда:**  
     - Сахар вызывает зависимость
-
-    **📚 Учёба:**  
-    - ЕГЭ отменят в 2026
 
     **🤖 ИИ:**  
     - ChatGPT заменит программистов
 
-    **🔬 Наука:**  
-    - Учёные создали материал
-
     **🎮 Игры:**  
-    - Minecraft рекордсмен
+    - Minecraft закроют навсегда
     """)
 
 # ===== ОСНОВНОЙ ИНТЕРФЕЙС =====
@@ -205,9 +202,7 @@ if clear_button:
     st.rerun()
 
 if examples_button:
-    st.session_state["example"] = (
-        "Сахар вызывает зависимость сильнее кокаина!"
-    )
+    st.session_state["example"] = "Земля круглая"
 
 if st.session_state.get("load_history"):
     item = st.session_state["load_history"]
@@ -250,7 +245,7 @@ if check_button or "example" in st.session_state:
                         text_to_check
                     )
 
-            with st.spinner("🌐 Проверка фактов и RSS-источников..."):
+            with st.spinner("🌐 Проверка фактов, Wikipedia и RSS..."):
                 fact_result = fact_checker.verify(text_to_check)
 
             cache[cache_key] = (
@@ -355,7 +350,7 @@ if check_button or "example" in st.session_state:
 
         # ===== ИТОГ =====
         st.markdown("---")
-        st.subheader("🎯 Итоговый вердикт")
+        st.subheader("🎯 Итоговый вердикt")
 
         if fact_result["verdict"] == "ФЕЙК":
             st.error(
