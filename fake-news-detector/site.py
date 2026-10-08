@@ -119,7 +119,7 @@ with st.sidebar:
 
     st.metric("Всего проверок", stats["total"])
     st.metric("Фейков (стилевой окрас)", stats["fake_style"])
-    st.metric("Правды (стилевой окрас)", stats["truth_style"])
+    st.metric("Правд (стилевой окрас)", stats["truth_style"])
     st.metric("Фейков (факты)", stats["fake_fact"])
     st.metric("Правд (факты)", stats["truth_fact"])
 
@@ -143,7 +143,10 @@ with st.sidebar:
                 else item["text"]
             )
 
-            if st.button(f"{emoji} {verdict_icon} {short_text}", key=f"history_{i}"):
+            if st.button(
+                f"{emoji} {verdict_icon} {short_text}",
+                key=f"history_{i}"
+            ):
                 st.session_state["load_history"] = item
 
         st.session_state["load_history"] = None
@@ -201,13 +204,19 @@ with col3:
     examples_button = st.button("📚 Примеры", use_container_width=True)
 
 if clear_button:
-    for key in ["example", "fact_result", "prediction", "confidence", "lemmatized"]:
+    for key in [
+        "example", "fact_result", "prediction",
+        "confidence", "lemmatized"
+    ]:
         if key in st.session_state:
             del st.session_state[key]
+
     st.rerun()
 
 if examples_button:
-    st.session_state["example"] = "Сахар вызывает зависимость сильнее кокаина!"
+    st.session_state["example"] = (
+        "Сахар вызывает зависимость сильнее кокаина!"
+    )
 
 if st.session_state.get("load_history"):
     item = st.session_state["load_history"]
@@ -246,7 +255,9 @@ if check_button or "example" in st.session_state:
                 lemmatized = lemmatize_text(clean_text(text_to_check))
             else:
                 with st.spinner("🔄 Анализ стилевого окраса..."):
-                    prediction, confidence, lemmatized = analyze_style(text_to_check)
+                    prediction, confidence, lemmatized = analyze_style(
+                        text_to_check
+                    )
 
             with st.spinner("🌐 Проверка фактов и RSS-источников..."):
                 fact_result = fact_checker.verify(
@@ -319,13 +330,19 @@ if check_button or "example" in st.session_state:
             st.metric("Длина текста", f"{len(text_to_check)} симв.")
 
         with col2:
-            st.metric("Слов после лемматизации", f"{len(lemmatized.split())}")
+            st.metric(
+                "Слов после лемматизации",
+                f"{len(lemmatized.split())}"
+            )
 
         with col3:
             if prediction is None:
                 st.metric("Уверенность стилевого окраса", "—")
             else:
-                st.metric("Уверенность стилевого окраса", f"{confidence:.1f}%")
+                st.metric(
+                    "Уверенность стилевого окраса",
+                    f"{confidence:.1f}%"
+                )
 
         st.markdown("---")
 
@@ -370,11 +387,17 @@ if check_button or "example" in st.session_state:
         st.subheader("🎯 Итоговый вердикт")
 
         if fact_result["verdict"] == "ФЕЙК":
-            st.error("❌ **ФЕЙКОВАЯ НОВОСТЬ** (не соответствует фактам)")
+            st.error(
+                "❌ **ФЕЙКОВАЯ НОВОСТЬ** "
+                "(не соответствует фактам)"
+            )
             st.write(f"**Причина:** {fact_result['reason']}")
 
         elif fact_result["verdict"] == "ПРАВДА":
-            st.success("✅ **ПРАВДИВАЯ НОВОСТЬ** (подтверждено фактами)")
+            st.success(
+                "✅ **ПРАВДИВАЯ НОВОСТЬ** "
+                "(подтверждено фактами)"
+            )
             st.write(f"**Причина:** {fact_result['reason']}")
 
         elif prediction is None:
@@ -389,7 +412,8 @@ if check_button or "example" in st.session_state:
             and confidence < 70
         ):
             st.warning(
-                "⚠️ **НЕДОСТАТОЧНО ДАННЫХ ДЛЯ НАДЁЖНОГО ВЕРДИКТА**"
+                "⚠️ **НЕДОСТАТОЧНО ДАННЫХ "
+                "ДЛЯ НАДЁЖНОГО ВЕРДИКТА**"
             )
             st.write(f"**Причина:** {fact_result['reason']}")
             st.write(
@@ -402,11 +426,15 @@ if check_button or "example" in st.session_state:
             fact_result["verdict"] == "НЕИЗВЕСТНО"
             and prediction == 0
         ):
-            st.error("❌ **Вероятно ФЕЙК** (стилевой окрас)")
+            st.error(
+                "❌ **Вероятно ФЕЙК** (стилевой окрас)"
+            )
             st.write(f"**Уверенность:** {confidence:.1f}%")
 
         else:
-            st.success("✅ **Вероятно ПРАВДА** (стилевой окрас)")
+            st.success(
+                "✅ **Вероятно ПРАВДА** (стилевой окрас)"
+            )
             st.write(f"**Уверенность:** {confidence:.1f}%")
 
         # ===== ИСТОЧНИКИ =====
@@ -415,6 +443,7 @@ if check_button or "example" in st.session_state:
 
             for detail in fact_result["details"]:
                 links = detail.get("links", [])
+
                 if links:
                     all_links.extend(links)
 
@@ -425,7 +454,21 @@ if check_button or "example" in st.session_state:
                 unique_links = list(dict.fromkeys(all_links))[:10]
 
                 for i, link in enumerate(unique_links, 1):
-                    st.markdown(f"{i}. [{link}]({link})")
+                    matching_detail = next(
+                        (
+                            detail for detail in fact_result["details"]
+                            if link in detail.get("links", [])
+                        ),
+                        None
+                    )
+
+                    if matching_detail:
+                        st.markdown(
+                            f"{i}. [{link}]({link}) "
+                            f"*( {matching_detail['reason']} )*"
+                        )
+                    else:
+                        st.markdown(f"{i}. [{link}]({link})")
 
                 st.download_button(
                     label="📥 Скачать список ссылок",
@@ -448,11 +491,15 @@ if check_button or "example" in st.session_state:
                     st.write(f"   *{detail['reason']}*")
 
                     links = detail.get("links", [])
+
                     if links:
                         st.write("   **Ссылки:**")
 
-                        for link in links[:3]:
-                            st.write(f"   - [{link}]({link})")
+                        for link in links:
+                            st.markdown(
+                                f"   - [{link}]({link}) "
+                                f"*( {detail['reason']} )*"
+                            )
 
                     st.divider()
 
