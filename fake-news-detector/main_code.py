@@ -6,6 +6,7 @@ import feedparser
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from duckduckgo_search import DDGS
 
+# ===== НАСТРОЙКИ =====
 RSS_CACHE_TIME = 600
 MAX_FEED_ARTICLES = 8
 FEED_TIMEOUT = 5
