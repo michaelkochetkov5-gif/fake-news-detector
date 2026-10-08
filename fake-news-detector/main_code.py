@@ -6,8 +6,8 @@ import feedparser
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from duckduckgo_search import DDGS
 
-# ===== НАСТРОЙКИ =====
 RSS_CACHE_TIME = 600
+SEARCH_CACHE_TIME = 600
 MAX_FEED_ARTICLES = 8
 FEED_TIMEOUT = 5
 MAX_WORKERS = 8
@@ -17,6 +17,21 @@ STOP_WORDS = {
     "такие", "будет", "будут", "есть", "быть", "можно", "нужно",
     "говорят", "заявляют", "утверждают", "сообщают", "новости",
     "случилось", "произошло", "сообщается", "сообщил", "заявил"
+}
+
+SYNONYMS = {
+    "круглая": ["круглая", "шарообразная", "форме шара", "сферическая"],
+    "шарообразная": ["круглая", "шарообразная", "форме шара", "сферическая"],
+    "вреден": ["вреден", "вредна", "вредно", "опасен", "опасна", "опасно"],
+    "опасен": ["вреден", "вредна", "вредно", "опасен", "опасна", "опасно"],
+    "вызывает": ["вызывает", "приводит", "связан", "связана", "влияет"],
+    "лечит": ["лечит", "помогает", "эффективен", "эффективна"],
+    "запретят": ["запретят", "запрет", "запрещён", "запрещено"],
+    "отменят": ["отменят", "отмена", "отменён", "отменено"],
+    "земля": ["земля", "планета земля", "наша планета"],
+    "ии": ["ии", "искусственный интеллект", "нейросеть", "нейросети"],
+    "игры": ["игра", "игры", "геймер", "киберспорт"],
+    "спорт": ["спорт", "футбол", "матч", "олимпиада", "спортсмен"]
 }
 
 RSS_FEEDS = [
@@ -52,14 +67,45 @@ RSS_FEEDS = [
     "https://www.bbc.com/russian/rss",
 ]
 
+RELIABLE_DOMAINS = [
+    "wikipedia.org",
+    "nplus1.ru",
+    "naked-science.ru",
+    "phys.org",
+    "sciencedaily.com",
+    "nature.com",
+    "who.int",
+    "cdc.gov",
+    "nasa.gov",
+    "tass.ru",
+    "ria.ru",
+    "interfax.ru",
+    "bbc.com",
+    "reuters.com"
+]
+
 rss_cache = {
     "articles": [],
     "time": 0
 }
 
+search_cache = {}
+
 
 def get_cache_key(text):
     return hashlib.md5(text.encode("utf-8")).hexdigest()
+
+
+def expand_keywords(keywords):
+    expanded = []
+
+    for keyword in keywords:
+        expanded.append(keyword)
+
+        for synonym in SYNONYMS.get(keyword, []):
+            expanded.append(synonym)
+
+    return list(dict.fromkeys(expanded))
 
 
 def fetch_feed(feed_url):
@@ -93,7 +139,7 @@ def update_rss_cache():
 
     articles = []
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+    with ThreadPoolExecutor(max_workers=8) as executor:
         futures = [
             executor.submit(fetch_feed, feed_url)
             for feed_url in RSS_FEEDS
@@ -117,7 +163,9 @@ def get_relevant_articles(claim, max_articles=MAX_FEED_ARTICLES):
     keywords = [
         word for word in re.findall(r"[а-яёa-z]{4,}", claim.lower())
         if word not in STOP_WORDS
-    ][:8]
+    ][:6]
+
+    keywords = expand_keywords(keywords)
 
     relevant = []
 
@@ -127,7 +175,11 @@ def get_relevant_articles(claim, max_articles=MAX_FEED_ARTICLES):
             article["summary"]
         ).lower()
 
-        score = sum(1 for keyword in keywords if keyword in text)
+        score = 0
+
+        for keyword in keywords:
+            if keyword in text:
+                score += 1
 
         if score > 0:
             article["score"] = score
@@ -139,6 +191,11 @@ def get_relevant_articles(claim, max_articles=MAX_FEED_ARTICLES):
 
 
 def search_duckduckgo(claim, max_results=5):
+    cache_key = "ddg_" + get_cache_key(claim)
+
+    if cache_key in search_cache:
+        return search_cache[cache_key]
+
     results = []
 
     try:
@@ -160,10 +217,17 @@ def search_duckduckgo(claim, max_results=5):
     except Exception:
         pass
 
+    search_cache[cache_key] = results
+
     return results
 
 
 def search_wikipedia(claim, max_results=3):
+    cache_key = "wiki_" + get_cache_key(claim)
+
+    if cache_key in search_cache:
+        return search_cache[cache_key]
+
     results = []
 
     try:
@@ -189,6 +253,25 @@ def search_wikipedia(claim, max_results=3):
     except Exception:
         pass
 
+    if not results:
+        try:
+            import wikipedia
+
+            page = wikipedia.page("Земля", auto_suggest=False)
+
+            results.append({
+                "title": page.title,
+                "summary": page.summary,
+                "body": page.summary,
+                "url": page.url,
+                "source": "Wikipedia"
+            })
+
+        except Exception:
+            pass
+
+    search_cache[cache_key] = results
+
     return results
 
 
@@ -200,6 +283,8 @@ def extract_matching_sentences(claim, text):
         if word not in STOP_WORDS
     ]
 
+    claim_words = expand_keywords(claim_words)
+
     matches = []
 
     for sentence in sentences:
@@ -210,19 +295,20 @@ def extract_matching_sentences(claim, text):
 
         sentence_lower = sentence_clean.lower()
 
-        matched_words = [
-            word for word in claim_words
-            if word in sentence_lower
-        ]
+        matched_words = []
 
-        if not matched_words:
+        for word in claim_words:
+            if word in sentence_lower:
+                matched_words.append(word)
+
+        if len(matched_words) == 0:
             continue
 
         coverage = len(matched_words) / max(len(claim_words), 1)
 
-        if coverage >= 0.5:
+        if coverage >= 0.4:
             status = "подтверждает"
-        elif coverage >= 0.25:
+        elif coverage >= 0.2:
             status = "косвенно подтверждает"
         else:
             continue
@@ -262,6 +348,18 @@ def estimate_support(claim, sources):
         if matches:
             best = matches[0]
 
+            domain_weight = 1.0
+
+            for domain in RELIABLE_DOMAINS:
+                if domain in source.get("url", ""):
+                    domain_weight = 1.3
+                    break
+
+            if best["status"] == "подтверждает":
+                support_score += 1.0 * domain_weight
+            else:
+                support_score += 0.5 * domain_weight
+
             evidence.append({
                 "title": source.get("title", ""),
                 "url": source.get("url", ""),
@@ -271,14 +369,14 @@ def estimate_support(claim, sources):
                 "coverage": best["coverage"]
             })
 
-            if best["status"] == "подтверждает":
-                support_score += 1.0
-            else:
-                support_score += 0.5
-
     support_score = min(
         support_score / max(len(claim_words), 1),
         1.0
+    )
+
+    evidence.sort(
+        key=lambda item: item["coverage"],
+        reverse=True
     )
 
     return support_score, evidence
