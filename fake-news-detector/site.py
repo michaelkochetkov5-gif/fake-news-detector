@@ -2,10 +2,14 @@ import streamlit as st
 import joblib
 import re
 import json
+import hashlib
 from pymorphy3 import MorphAnalyzer
 from main_code import FactChecker
 from scipy.special import expit
 from datetime import datetime
+
+def get_cache_key(text):
+    return hashlib.md5(text.encode("utf-8")).hexdigest()
 
 # ===== ФАКТЧЕКЕР =====
 @st.cache_resource
