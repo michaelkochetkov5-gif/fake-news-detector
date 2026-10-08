@@ -4,11 +4,10 @@ import time
 import hashlib
 import requests
 import feedparser
-from datetime import datetime
 from duckduckgo_search import DDGS
 
 # ===== НАСТРОЙКИ =====
-RSS_CACHE_TIME = 600  # секунд, 10 минут
+RSS_CACHE_TIME = 600
 MAX_FEED_ARTICLES = 8
 FEED_TIMEOUT = 5
 
@@ -98,29 +97,48 @@ RSS_FEEDS = {
 }
 
 THEME_KEYWORDS = {
-    "еда": ["еда", "питание", "сахар", "кофе", "еда", "диета", "витамин",
-             "вакцина", "здоровье", "лекарство", "болезнь", "врач", "медицина"],
-    "учёба": ["школа", "школы", "егэ", "университет", "студент", "экзамен",
-               "учёба", "образование", "учитель", "домашнее задание"],
-    "ии": ["ии", "искусственный интеллект", "chatgpt", "нейросеть",
-            "нейросети", "робот", "роботы", "gpt", "gemini"],
-    "it": ["компьютер", "программирование", "python", "windows", "google",
-            "apple", "интернет", "сайт", "приложение", "технологии", "хакер"],
-    "игры": ["игра", "игры", "minecraft", "gta", "fortnite", "roblox",
-              "counter-strike", "киберспорт", "консоль", "steam"],
-    "кино": ["фильм", "фильмы", "кино", "сериал", "режиссёр", "актёр",
-              "оскар", "киностудия", "премьера"],
-    "музыка": ["музыка", "песня", "альбом", "концерт", "spotify",
-                "артист", "певец", "гитара", "фестиваль"],
-    "спорт": ["футбол", "спорт", "олимпиада", "матч", "чемпионат",
-               "спортсмен", "хоккей", "баскетбол", "тренер", "рекорд"],
-    "путешествия": ["путешествие", "туризм", "виза", "самолёт", "аэропорт",
-                     "отель", "паспорт", "граница", "поездка", "отпуск"],
-    "факты": ["наука", "учёные", "исследование", "земля", "космос",
-               "луна", "солнце", "днк", "физика", "химия", "биология"],
+    "еда": [
+        "еда", "питание", "сахар", "кофе", "диета", "витамин",
+        "вакцина", "здоровье", "лекарство", "болезнь", "врач", "медицина"
+    ],
+    "учёба": [
+        "школа", "школы", "егэ", "университет", "студент", "экзамен",
+        "учёба", "образование", "учитель", "домашнее задание"
+    ],
+    "ии": [
+        "ии", "искусственный интеллект", "chatgpt", "нейросеть",
+        "нейросети", "робот", "роботы", "gpt", "gemini"
+    ],
+    "it": [
+        "компьютер", "программирование", "python", "windows", "google",
+        "apple", "интернет", "сайт", "приложение", "технологии", "хакер"
+    ],
+    "игры": [
+        "игра", "игры", "minecraft", "gta", "fortnite", "roblox",
+        "counter-strike", "киберспорт", "консоль", "steam"
+    ],
+    "кино": [
+        "фильм", "фильмы", "кино", "сериал", "режиссёр", "актёр",
+        "оскар", "киностудия", "премьера"
+    ],
+    "музыка": [
+        "музыка", "песня", "альбом", "концерт", "spotify",
+        "артист", "певец", "гитара", "фестиваль"
+    ],
+    "спорт": [
+        "футбол", "спорт", "олимпиада", "матч", "чемпионат",
+        "спортсмен", "хоккей", "баскетбол", "тренер", "рекорд"
+    ],
+    "путешествия": [
+        "путешествие", "туризм", "виза", "самолёт", "аэропорт",
+        "отель", "паспорт", "граница", "поездка", "отпуск"
+    ],
+    "факты": [
+        "наука", "учёные", "исследование", "земля", "космос",
+        "луна", "солнце", "днк", "физика", "химия", "биология"
+    ],
 }
 
-# ===== КЭШ RSS =====
 rss_cache = {}
 
 
@@ -145,7 +163,6 @@ def save_rss_cache(theme, articles):
     }
 
 
-# ===== ОПРЕДЕЛЕНИЕ ТЕМЫ =====
 def detect_theme(text, forced_theme="авто"):
     if forced_theme != "авто":
         return forced_theme
@@ -169,10 +186,9 @@ def detect_theme(text, forced_theme="авто"):
     return max(scores, key=scores.get)
 
 
-# ===== ПОЛУЧЕНИЕ СТАТЕЙ ИЗ RSS =====
 def fetch_feed(feed_url):
     try:
-        response = requests_get(feed_url)
+        response = requests.get(feed_url, timeout=FEED_TIMEOUT)
         feed = feedparser.parse(response.content)
 
         articles = []
@@ -189,12 +205,6 @@ def fetch_feed(feed_url):
 
     except Exception:
         return []
-
-
-def requests_get(url):
-    import requests
-
-    return requests.get(url, timeout=FEED_TIMEOUT)
 
 
 def get_rss_articles(theme):
@@ -237,7 +247,6 @@ def get_relevant_articles(claim, theme, max_articles=MAX_FEED_ARTICLES):
     return relevant[:max_articles]
 
 
-# ===== ПОИСК DUCKDUCKGO =====
 def search_duckduckgo(claim, max_results=5):
     results = []
 
@@ -251,8 +260,10 @@ def search_duckduckgo(claim, max_results=5):
             for result in search_results:
                 results.append({
                     "title": result.get("title", ""),
+                    "summary": result.get("body", ""),
                     "body": result.get("body", ""),
-                    "href": result.get("href", "")
+                    "url": result.get("href", ""),
+                    "source": "DuckDuckGo"
                 })
 
     except Exception:
@@ -261,7 +272,6 @@ def search_duckduckgo(claim, max_results=5):
     return results
 
 
-# ===== ПОИСК WIKIPEDIA =====
 def search_wikipedia(claim, max_results=3):
     results = []
 
@@ -276,8 +286,10 @@ def search_wikipedia(claim, max_results=3):
 
                 results.append({
                     "title": page.title,
-                    "summary": page.summary[:700],
-                    "url": page.url
+                    "summary": page.summary,
+                    "body": page.summary,
+                    "url": page.url,
+                    "source": "Wikipedia"
                 })
 
             except Exception:
@@ -289,7 +301,52 @@ def search_wikipedia(claim, max_results=3):
     return results
 
 
-# ===== ОЦЕНКА ПОДТВЕРЖДЕНИЯ =====
+def extract_matching_sentences(claim, text):
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+
+    claim_words = [
+        word for word in re.findall(r"[а-яёa-z]{4,}", claim.lower())
+        if word not in STOP_WORDS
+    ]
+
+    matches = []
+
+    for sentence in sentences:
+        sentence_clean = sentence.strip()
+
+        if len(sentence_clean) < 20:
+            continue
+
+        sentence_lower = sentence_clean.lower()
+
+        matched_words = [
+            word for word in claim_words
+            if word in sentence_lower
+        ]
+
+        if not matched_words:
+            continue
+
+        coverage = len(matched_words) / max(len(claim_words), 1)
+
+        if coverage >= 0.5:
+            status = "подтверждает"
+        elif coverage >= 0.25:
+            status = "косвенно подтверждает"
+        else:
+            continue
+
+        matches.append({
+            "sentence": sentence_clean,
+            "status": status,
+            "coverage": coverage
+        })
+
+    matches.sort(key=lambda item: item["coverage"], reverse=True)
+
+    return matches[:2]
+
+
 def estimate_support(claim, sources):
     claim_words = [
         word for word in re.findall(r"[а-яёa-z]{4,}", claim.lower())
@@ -297,24 +354,45 @@ def estimate_support(claim, sources):
     ]
 
     if not claim_words:
-        return 0.0
+        return 0.0, []
 
-    supported = 0
+    evidence = []
+    support_score = 0.0
 
     for source in sources:
         text = (
-            source.get("title", "") + " " +
-            source.get("summary", "") + " " +
+            source.get("title", "") + ". " +
+            source.get("summary", "") + ". " +
             source.get("body", "")
-        ).lower()
+        )
 
-        matches = sum(1 for word in claim_words if word in text)
-        supported += matches
+        matches = extract_matching_sentences(claim, text)
 
-    return min(supported / max(len(claim_words), 1), 1.0)
+        if matches:
+            best = matches[0]
+
+            evidence.append({
+                "title": source.get("title", ""),
+                "url": source.get("url", ""),
+                "source": source.get("source", ""),
+                "sentence": best["sentence"],
+                "status": best["status"],
+                "coverage": best["coverage"]
+            })
+
+            if best["status"] == "подтверждает":
+                support_score += 1.0
+            else:
+                support_score += 0.5
+
+    support_score = min(
+        support_score / max(len(claim_words), 1),
+        1.0
+    )
+
+    return support_score, evidence
 
 
-# ===== ГЛАВНЫЙ КЛАСС =====
 class FactChecker:
     def verify(self, text, theme="авто"):
         theme = detect_theme(text, theme)
@@ -326,48 +404,46 @@ class FactChecker:
         all_sources = []
 
         for result in duckduckgo_results:
-            all_sources.append({
-                "title": result["title"],
-                "summary": result["body"],
-                "url": result["href"],
-                "source": "DuckDuckGo"
-            })
+            all_sources.append(result)
 
         for result in wikipedia_results:
-            all_sources.append({
-                "title": result["title"],
-                "summary": result["summary"],
-                "url": result["url"],
-                "source": "Wikipedia"
-            })
+            all_sources.append(result)
 
         for result in rss_results:
             all_sources.append({
                 "title": result["title"],
                 "summary": result["summary"],
+                "body": result["summary"],
                 "url": result["link"],
                 "source": result["source"]
             })
 
-        support = estimate_support(text, all_sources)
+        support, evidence = estimate_support(text, all_sources)
 
         details = []
 
-        for source in all_sources[:8]:
+        for item in evidence[:8]:
             details.append({
-                "fact": source["title"],
-                "source": source["source"],
-                "reason": "Найден потенциально релевантный источник.",
-                "links": [source["url"]] if source["url"] else [],
-                "result": None
+                "fact": item["title"],
+                "source": item["source"],
+                "reason": (
+                    f"Источник {item['status']} утверждение: "
+                    f"«{item['sentence']}»"
+                ),
+                "links": [item["url"]] if item["url"] else [],
+                "result": (
+                    True
+                    if item["status"] == "подтверждает"
+                    else None
+                )
             })
 
-        if support >= 0.7 and len(all_sources) >= 3:
+        if support >= 0.7 and len(evidence) >= 2:
             verdict = "ПРАВДА"
             confidence = min(0.55 + support * 0.35, 0.92)
             reason = (
-                "Найдено несколько релевантных источников, "
-                "подтверждающих основные слова утверждения."
+                "Найдены источники, подтверждающие или косвенно "
+                "подтверждающие утверждение."
             )
 
         elif support <= 0.2 and len(all_sources) >= 3:
@@ -382,8 +458,8 @@ class FactChecker:
             verdict = "НЕИЗВЕСТНО"
             confidence = 0.5
             reason = (
-                "Найденных источников недостаточно или они лишь косвенно "
-                "связаны с утверждением."
+                "Найденных подтверждающих источников недостаточно "
+                "или они лишь косвенно связаны с утверждением."
             )
 
         return {
