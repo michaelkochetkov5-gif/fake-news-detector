@@ -856,10 +856,18 @@ class FactChecker:
 
         elif confirming_sources:
             verdict = "ПРАВДА"
-            confidence = min(
-                0.62 + support * 0.25,
-                0.9
-            )
+
+            if len(confirming_sources) >= 2:
+                confidence = max(
+                    0.70,
+                    min(
+                        0.70 + support * 0.20,
+                        0.92
+                    )
+                )
+            else:
+                confidence = 0.65
+
             reason = (
                 "Найдены релевантные источники, которые подтверждают "
                 "или косвенно подтверждают утверждение."
