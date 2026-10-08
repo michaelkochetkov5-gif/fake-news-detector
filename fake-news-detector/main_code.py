@@ -8,11 +8,6 @@ import time
 from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
 
-try:
-    import wikipedia
-except ImportError:
-    wikipedia = None
-
 CACHE_FILE = "cache.json"
 
 if os.path.exists(CACHE_FILE):
@@ -58,8 +53,8 @@ STOP_WORDS = {
 
 SYNONYMS = {
     "круглая": [
-        "круглая", "шарообразная", "форме шара", "форме шара",
-        "сферическая", "геоид", "эллипсоид", "форма земли"
+        "круглая", "шарообразная", "форме шара", "сферическая",
+        "геоид", "эллипсоид", "форма земли"
     ],
     "шара": [
         "шара", "шарообразная", "круглая", "сферическая",
@@ -115,6 +110,14 @@ def clean_text(text):
 
     return text.strip()
 
+def normalize_word(word):
+    word = word.lower().strip()
+
+    if len(word) <= 5:
+        return word
+
+    return word[:5]
+
 def get_claim_words(text):
     words = re.findall(r"[а-яёa-z]{4,}", text.lower())
 
@@ -123,51 +126,27 @@ def get_claim_words(text):
         if word not in STOP_WORDS
     ]
 
-    return expand_keywords(list(dict.fromkeys(words)))
+    words = expand_keywords(list(dict.fromkeys(words)))
 
-def search_duckduckgo(claim, max_results=6):
-    cache_key = "ddg_" + get_cache_key(claim)
+    normalized = [
+        normalize_word(word)
+        for word in words
+    ]
 
-    if cache_key in search_cache:
-        return search_cache[cache_key]
+    return list(dict.fromkeys(normalized))
 
-    results = []
-
-    try:
-        with DDGS() as ddgs:
-            search_results = ddgs.text(
-                claim,
-                region="ru-ru",
-                safesearch="moderate",
-                max_results=max_results
-            )
-
-            for result in search_results:
-                results.append({
-                    "title": result.get("title", ""),
-                    "summary": clean_text(result.get("body", "")),
-                    "body": clean_text(result.get("body", "")),
-                    "url": result.get("href", ""),
-                    "source": "DuckDuckGo"
-                })
-
-    except Exception:
-        pass
-
-    search_cache[cache_key] = results
-    save_cache()
-
-    return results
-
-def search_wikipedia(claim, max_results=3):
-    cache_key = "wiki_" + get_cache_key(claim)
-
-    if cache_key in search_cache:
-        return search_cache[cache_key]
-
-    results = []
-
+def make_search_queries(claim):
     queries = [claim]
+
+    words = re.findall(r"[а-яёa-z]{4,}", claim.lower())
+
+    words = [
+        word for word in words
+        if word not in STOP_WORDS
+    ]
+
+    if len(words) >= 2:
+        queries.append(" ".join(words))
 
     claim_lower = claim.lower()
 
@@ -176,41 +155,168 @@ def search_wikipedia(claim, max_results=3):
 
     if "круглая" in claim_lower or "шара" in claim_lower:
         queries.append("Форма Земли")
+        queries.append("Земля сферическая")
 
-    if wikipedia:
-        try:
-            wikipedia.set_lang("ru")
+    if "вакцина" in claim_lower:
+        queries.append("вакцина безопасность исследования")
 
+    if "вред" in claim_lower or "вреден" in claim_lower:
+        queries.append("научные исследования влияние")
+
+    return list(dict.fromkeys(queries))
+
+def search_duckduckgo(claim, max_results=8):
+    cache_key = "ddg_" + get_cache_key(claim)
+
+    if cache_key in search_cache:
+        return search_cache[cache_key]
+
+    results = []
+    seen_urls = set()
+
+    queries = make_search_queries(claim)
+
+    try:
+        with DDGS() as ddgs:
             for query in queries:
                 try:
-                    search_results = wikipedia.search(
+                    web_results = ddgs.text(
                         query,
-                        results=max_results
+                        region="ru-ru",
+                        safesearch="moderate",
+                        max_results=5
                     )
 
-                    for title in search_results:
-                        try:
-                            page = wikipedia.page(
-                                title,
-                                auto_suggest=False
-                            )
+                    for result in web_results:
+                        url = result.get("href", "")
+
+                        if url and url not in seen_urls:
+                            seen_urls.add(url)
 
                             results.append({
-                                "title": page.title,
-                                "summary": page.summary,
-                                "body": page.summary,
-                                "url": page.url,
-                                "source": "Wikipedia"
+                                "title": result.get("title", ""),
+                                "summary": clean_text(result.get("body", "")),
+                                "body": clean_text(result.get("body", "")),
+                                "url": url,
+                                "source": "DuckDuckGo"
                             })
-
-                        except Exception:
-                            continue
 
                 except Exception:
                     continue
 
+            try:
+                news_results = ddgs.news(
+                    claim,
+                    region="ru-ru",
+                    safesearch="moderate",
+                    max_results=5
+                )
+
+                for result in news_results:
+                    url = result.get("href", "") or result.get("url", "")
+
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+
+                        results.append({
+                            "title": result.get("title", ""),
+                            "summary": clean_text(result.get("body", "")),
+                            "body": clean_text(result.get("body", "")),
+                            "url": url,
+                            "source": result.get("source", "DuckDuckGo News")
+                        })
+
+            except Exception:
+                pass
+
+    except Exception:
+        pass
+
+    search_cache[cache_key] = results[:max_results]
+    save_cache()
+
+    return results[:max_results]
+
+def search_wikipedia_api(claim, max_results=5):
+    cache_key = "wiki_" + get_cache_key(claim)
+
+    if cache_key in search_cache:
+        return search_cache[cache_key]
+
+    results = []
+    seen_titles = set()
+
+    queries = make_search_queries(claim)
+
+    for query in queries:
+        try:
+            search_url = "https://ru.wikipedia.org/w/api.php"
+
+            search_params = {
+                "action": "query",
+                "list": "search",
+                "srsearch": query,
+                "srlimit": 3,
+                "format": "json",
+                "utf8": 1
+            }
+
+            response = requests.get(
+                search_url,
+                params=search_params,
+                timeout=10
+            )
+
+            data = response.json()
+
+            pages = data.get("query", {}).get("search", [])
+
+            for page in pages:
+                title = page.get("title", "")
+
+                if title in seen_titles:
+                    continue
+
+                seen_titles.add(title)
+
+                extract_params = {
+                    "action": "query",
+                    "prop": "extracts|info",
+                    "explaintext": 1,
+                    "exintro": 1,
+                    "inprop": "url",
+                    "titles": title,
+                    "format": "json",
+                    "utf8": 1
+                }
+
+                extract_response = requests.get(
+                    search_url,
+                    params=extract_params,
+                    timeout=10
+                )
+
+                extract_data = extract_response.json()
+
+                pages_data = extract_data.get(
+                    "query", {}
+                ).get("pages", {})
+
+                for page_id, page_data in pages_data.items():
+                    extract = page_data.get("extract", "")
+                    url = page_data.get("fullurl", "")
+
+                    if extract and url:
+                        results.append({
+                            "title": title,
+                            "summary": clean_text(extract),
+                            "body": clean_text(extract),
+                            "url": url,
+                            "source": "Wikipedia"
+                        })
+
         except Exception:
-            pass
+            continue
 
     unique_results = []
     seen_urls = set()
@@ -220,10 +326,10 @@ def search_wikipedia(claim, max_results=3):
             seen_urls.add(result["url"])
             unique_results.append(result)
 
-    search_cache[cache_key] = unique_results
+    search_cache[cache_key] = unique_results[:max_results]
     save_cache()
 
-    return unique_results
+    return unique_results[:max_results]
 
 RSS_FEEDS = [
     {
@@ -273,22 +379,27 @@ def get_relevant_articles(claim, max_articles=5):
 
                 text = (title + " " + summary).lower()
 
+                text_words = re.findall(
+                    r"[а-яёa-z]{4,}",
+                    text
+                )
+
+                text_stems = {
+                    normalize_word(word)
+                    for word in text_words
+                }
+
                 matched_words = []
 
                 for word in claim_words:
-                    if word in text:
+                    if word in text_stems:
                         matched_words.append(word)
 
                 unique_matches = list(dict.fromkeys(matched_words))
 
                 coverage = len(unique_matches) / max(len(claim_words), 1)
 
-                is_relevant = (
-                    len(unique_matches) >= 2
-                    and coverage >= 0.4
-                )
-
-                if is_relevant:
+                if len(unique_matches) >= 2 and coverage >= 0.4:
                     articles.append({
                         "title": title,
                         "summary": summary,
@@ -331,26 +442,34 @@ def find_best_sentence(claim, text):
     for sentence in sentences:
         sentence_clean = sentence.strip()
 
-        if len(sentence_clean) < 40:
+        if len(sentence_clean) < 30:
             continue
 
-        sentence_lower = sentence_clean.lower()
+        sentence_words = re.findall(
+            r"[а-яёa-z]{4,}",
+            sentence_clean.lower()
+        )
+
+        sentence_stems = {
+            normalize_word(word)
+            for word in sentence_words
+        }
 
         matched_words = []
 
         for word in claim_words:
-            if word in sentence_lower:
+            if word in sentence_stems:
                 matched_words.append(word)
 
         unique_matches = list(dict.fromkeys(matched_words))
 
         coverage = len(unique_matches) / max(len(claim_words), 1)
 
-        if coverage >= 0.5:
+        if coverage >= 0.45:
             status = "подтверждает"
-        elif coverage >= 0.3:
+        elif coverage >= 0.25:
             status = "косвенно подтверждает"
-        elif coverage >= 0.15:
+        elif coverage >= 0.1:
             status = "связан с темой утверждения"
         else:
             continue
@@ -395,9 +514,9 @@ def estimate_support(claim, sources):
             if best_match["status"] == "подтверждает":
                 support_score += 1.0
             elif best_match["status"] == "косвенно подтверждает":
-                support_score += 0.5
+                support_score += 0.6
             else:
-                support_score += 0.2
+                support_score += 0.25
 
     support_score = min(
         support_score / max(len(claim_words), 1),
@@ -424,7 +543,7 @@ class FactChecker:
 
     def verify(self, text):
         duckduckgo_results = search_duckduckgo(text)
-        wikipedia_results = search_wikipedia(text)
+        wikipedia_results = search_wikipedia_api(text)
         rss_results = get_relevant_articles(text)
 
         all_sources = []
@@ -473,19 +592,29 @@ class FactChecker:
                 source.get("title", "") + " " +
                 source.get("summary", "") + " " +
                 source.get("body", "")
-            ).lower()
+            )
+
+            source_words = re.findall(
+                r"[а-яёa-z]{4,}",
+                source_text.lower()
+            )
+
+            source_stems = {
+                normalize_word(word)
+                for word in source_words
+            }
 
             matched_words = []
 
             for word in claim_words:
-                if word in source_text:
+                if word in source_stems:
                     matched_words.append(word)
 
             unique_matches = list(dict.fromkeys(matched_words))
 
             coverage = len(unique_matches) / max(len(claim_words), 1)
 
-            if len(unique_matches) >= 2 and coverage >= 0.4:
+            if len(unique_matches) >= 2 or coverage >= 0.4:
                 relevant_sources.append({
                     "source": source,
                     "coverage": coverage
@@ -511,7 +640,7 @@ class FactChecker:
                 sentence = ""
 
                 for sentence_candidate in sentences:
-                    if len(sentence_candidate.strip()) > 40:
+                    if len(sentence_candidate.strip()) > 30:
                         sentence = sentence_candidate.strip()
                         break
 
@@ -537,36 +666,38 @@ class FactChecker:
             ]
         ]
 
-        if len(strong_evidence) >= 2 and support >= 0.5:
+        if len(strong_evidence) >= 2:
             verdict = "ПРАВДА"
-            confidence = min(0.6 + support * 0.3, 0.9)
+            confidence = min(0.65 + support * 0.25, 0.9)
             reason = (
                 "Найдено несколько релевантных источников, которые "
                 "подтверждают или косвенно подтверждают утверждение."
             )
 
-        elif len(strong_evidence) == 1 and support >= 0.35:
-            verdict = "НЕИЗВЕСТНО"
-            confidence = 0.55
+        elif len(strong_evidence) == 1:
+            verdict = "ПРАВДА"
+            confidence = 0.62
             reason = (
-                "Найден один релевантный источник, но его недостаточно "
-                "для надёжного подтверждения утверждения."
+                "Найден релевантный источник, который подтверждает "
+                "или косвенно подтверждает утверждение. Для более "
+                "надёжного вывода желательно больше независимых "
+                "источников."
             )
 
         elif relevant_sources:
             verdict = "НЕИЗВЕСТНО"
             confidence = 0.5
             reason = (
-                "Найдены источники по теме, но они не содержат "
-                "достаточно точного подтверждения или опровержения."
+                "Найдены источники по теме, но в них нет достаточно "
+                "точного подтверждения или опровержения утверждения."
             )
 
         else:
             verdict = "НЕИЗВЕСТНО"
             confidence = 0.5
             reason = (
-                "Не найдено достаточного количества действительно "
-                "релевантных источников для проверки утверждения."
+                "Поиск не нашёл достаточного количества релевантных "
+                "источников для проверки утверждения."
             )
 
         return {
