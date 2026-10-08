@@ -90,6 +90,28 @@ SYNONYMS = {
     ]
 }
 
+TRUSTED_DOMAINS = {
+    "wikipedia.org": 1.0,
+    "nasa.gov": 1.0,
+    "who.int": 1.0,
+    "un.org": 0.9,
+    "gov.ru": 0.9,
+    "edu.ru": 0.9,
+    "edu": 0.8,
+    "ria.ru": 0.7,
+    "tass.ru": 0.7,
+    "interfax.ru": 0.7,
+    "bbc.com": 0.8,
+    "reuters.com": 0.9,
+    "apnews.com": 0.9
+}
+
+CONTRADICTION_WORDS = [
+    "не является", "не имеет", "не соответствует",
+    "опровергает", "опровергнуто", "ложно", "ложная",
+    "фейк", "миф", "неверно", "неправда", "дезинформация"
+]
+
 def expand_keywords(words):
     expanded = []
 
@@ -135,6 +157,22 @@ def get_claim_words(text):
 
     return list(dict.fromkeys(normalized))
 
+def get_domain_trust(url):
+    try:
+        domain = url.lower()
+        domain = domain.replace("https://", "")
+        domain = domain.replace("http://", "")
+        domain = domain.split("/")[0]
+
+        for trusted_domain, trust in TRUSTED_DOMAINS.items():
+            if trusted_domain in domain:
+                return trust
+
+    except Exception:
+        pass
+
+    return 0.5
+
 def make_search_queries(claim):
     queries = [claim]
 
@@ -153,8 +191,10 @@ def make_search_queries(claim):
     if "земля" in claim_lower:
         queries.append("Земля")
 
-    if "круглая" in claim_lower or "шара" in claim_lower:
+    if "форма" in claim_lower:
         queries.append("Форма Земли")
+
+    if "шара" in claim_lower or "круглая" in claim_lower:
         queries.append("Земля сферическая")
 
     if "вакцина" in claim_lower:
@@ -165,7 +205,7 @@ def make_search_queries(claim):
 
     return list(dict.fromkeys(queries))
 
-def search_duckduckgo(claim, max_results=8):
+def search_duckduckgo(claim, max_results=10):
     cache_key = "ddg_" + get_cache_key(claim)
 
     if cache_key in search_cache:
@@ -201,6 +241,8 @@ def search_duckduckgo(claim, max_results=8):
                                 "source": "DuckDuckGo"
                             })
 
+                    time.sleep(1)
+
                 except Exception:
                     continue
 
@@ -226,6 +268,8 @@ def search_duckduckgo(claim, max_results=8):
                             "source": result.get("source", "DuckDuckGo News")
                         })
 
+                time.sleep(1)
+
             except Exception:
                 pass
 
@@ -237,7 +281,7 @@ def search_duckduckgo(claim, max_results=8):
 
     return results[:max_results]
 
-def search_wikipedia_api(claim, max_results=5):
+def search_wikipedia_api(claim, max_results=6):
     cache_key = "wiki_" + get_cache_key(claim)
 
     if cache_key in search_cache:
@@ -250,7 +294,7 @@ def search_wikipedia_api(claim, max_results=5):
 
     for query in queries:
         try:
-            search_url = "https://ru.wikipedia.org/w/api.php"
+            api_url = "https://ru.wikipedia.org/w/api.php"
 
             search_params = {
                 "action": "query",
@@ -262,7 +306,7 @@ def search_wikipedia_api(claim, max_results=5):
             }
 
             response = requests.get(
-                search_url,
+                api_url,
                 params=search_params,
                 timeout=10
             )
@@ -291,7 +335,7 @@ def search_wikipedia_api(claim, max_results=5):
                 }
 
                 extract_response = requests.get(
-                    search_url,
+                    api_url,
                     params=extract_params,
                     timeout=10
                 )
@@ -314,6 +358,8 @@ def search_wikipedia_api(claim, max_results=5):
                             "url": url,
                             "source": "Wikipedia"
                         })
+
+            time.sleep(0.5)
 
         except Exception:
             continue
@@ -399,7 +445,7 @@ def get_relevant_articles(claim, max_articles=5):
 
                 coverage = len(unique_matches) / max(len(claim_words), 1)
 
-                if len(unique_matches) >= 2 and coverage >= 0.4:
+                if len(unique_matches) >= 2 or coverage >= 0.4:
                     articles.append({
                         "title": title,
                         "summary": summary,
@@ -432,12 +478,12 @@ def get_relevant_articles(claim, max_articles=5):
 
     return articles
 
-def find_best_sentence(claim, text):
+def find_best_sentences(claim, text, max_sentences=3):
     sentences = re.split(r"(?<=[.!?])\s+", text)
 
     claim_words = get_claim_words(claim)
 
-    best_match = None
+    matches = []
 
     for sentence in sentences:
         sentence_clean = sentence.strip()
@@ -445,9 +491,11 @@ def find_best_sentence(claim, text):
         if len(sentence_clean) < 30:
             continue
 
+        sentence_lower = sentence_clean.lower()
+
         sentence_words = re.findall(
             r"[а-яёa-z]{4,}",
-            sentence_clean.lower()
+            sentence_lower
         )
 
         sentence_stems = {
@@ -465,7 +513,14 @@ def find_best_sentence(claim, text):
 
         coverage = len(unique_matches) / max(len(claim_words), 1)
 
-        if coverage >= 0.45:
+        has_contradiction = any(
+            word in sentence_lower
+            for word in CONTRADICTION_WORDS
+        )
+
+        if has_contradiction and coverage >= 0.25:
+            status = "противоречит"
+        elif coverage >= 0.45:
             status = "подтверждает"
         elif coverage >= 0.25:
             status = "косвенно подтверждает"
@@ -474,14 +529,18 @@ def find_best_sentence(claim, text):
         else:
             continue
 
-        if best_match is None or coverage > best_match["coverage"]:
-            best_match = {
-                "sentence": sentence_clean,
-                "status": status,
-                "coverage": coverage
-            }
+        matches.append({
+            "sentence": sentence_clean,
+            "status": status,
+            "coverage": coverage
+        })
 
-    return best_match
+    matches.sort(
+        key=lambda item: item["coverage"],
+        reverse=True
+    )
+
+    return matches[:max_sentences]
 
 def estimate_support(claim, sources):
     claim_words = get_claim_words(claim)
@@ -499,32 +558,46 @@ def estimate_support(claim, sources):
             source.get("body", "")
         )
 
-        best_match = find_best_sentence(claim, text)
+        sentence_matches = find_best_sentences(
+            claim,
+            text,
+            max_sentences=3
+        )
 
-        if best_match:
+        if sentence_matches:
+            best_coverage = sentence_matches[0]["coverage"]
+            trust = get_domain_trust(source.get("url", ""))
+
+            final_score = (
+                best_coverage * 0.7 +
+                trust * 0.3
+            )
+
             evidence.append({
                 "title": source.get("title", ""),
                 "url": source.get("url", ""),
                 "source": source.get("source", ""),
-                "sentence": best_match["sentence"],
-                "status": best_match["status"],
-                "coverage": best_match["coverage"]
+                "quotes": sentence_matches,
+                "coverage": best_coverage,
+                "trust": trust,
+                "score": final_score
             })
 
-            if best_match["status"] == "подтверждает":
-                support_score += 1.0
-            elif best_match["status"] == "косвенно подтверждает":
-                support_score += 0.6
-            else:
-                support_score += 0.25
+            for match in sentence_matches:
+                if match["status"] == "подтверждает":
+                    support_score += 1.0
+                elif match["status"] == "косвенно подтверждает":
+                    support_score += 0.6
+                elif match["status"] == "противоречит":
+                    support_score -= 1.0
 
     support_score = min(
-        support_score / max(len(claim_words), 1),
+        max(support_score / max(len(claim_words), 1), 0.0),
         1.0
     )
 
     evidence.sort(
-        key=lambda item: item["coverage"],
+        key=lambda item: item["score"],
         reverse=True
     )
 
@@ -568,19 +641,42 @@ class FactChecker:
         details = []
 
         for item in evidence[:8]:
+            quotes = item["quotes"]
+
+            quote_texts = []
+
+            for quote in quotes[:2]:
+                quote_texts.append(
+                    f"«{quote['sentence']}» "
+                    f"— источник {quote['status']} утверждение."
+                )
+
+            has_confirmation = any(
+                quote["status"] in [
+                    "подтверждает",
+                    "косвенно подтверждает"
+                ]
+                for quote in quotes
+            )
+
+            has_contradiction = any(
+                quote["status"] == "противоречит"
+                for quote in quotes
+            )
+
+            if has_contradiction and not has_confirmation:
+                result = False
+            elif has_confirmation:
+                result = True
+            else:
+                result = None
+
             details.append({
                 "fact": item["title"],
                 "source": item["source"],
-                "reason": (
-                    f"Источник {item['status']} утверждение: "
-                    f"«{item['sentence']}»"
-                ),
+                "reason": " ".join(quote_texts),
                 "links": [item["url"]] if item["url"] else [],
-                "result": (
-                    True
-                    if item["status"] == "подтверждает"
-                    else None
-                )
+                "result": result
             })
 
         relevant_sources = []
@@ -658,30 +754,45 @@ class FactChecker:
                     "result": None
                 })
 
-        strong_evidence = [
+        confirming_sources = [
             item for item in evidence
-            if item["status"] in [
-                "подтверждает",
-                "косвенно подтверждает"
-            ]
+            if any(
+                quote["status"] in [
+                    "подтверждает",
+                    "косвенно подтверждает"
+                ]
+                for quote in item["quotes"]
+            )
         ]
 
-        if len(strong_evidence) >= 2:
-            verdict = "ПРАВДА"
-            confidence = min(0.65 + support * 0.25, 0.9)
+        contradicting_sources = [
+            item for item in evidence
+            if any(
+                quote["status"] == "противоречит"
+                for quote in item["quotes"]
+            )
+        ]
+
+        if contradicting_sources and not confirming_sources:
+            verdict = "ФЕЙК"
+            confidence = min(
+                0.6 + len(contradicting_sources) * 0.1,
+                0.88
+            )
             reason = (
-                "Найдено несколько релевантных источников, которые "
-                "подтверждают или косвенно подтверждают утверждение."
+                "Найдены релевантные источники, которые противоречат "
+                "утверждению."
             )
 
-        elif len(strong_evidence) == 1:
+        elif confirming_sources:
             verdict = "ПРАВДА"
-            confidence = 0.62
+            confidence = min(
+                0.62 + support * 0.25,
+                0.9
+            )
             reason = (
-                "Найден релевантный источник, который подтверждает "
-                "или косвенно подтверждает утверждение. Для более "
-                "надёжного вывода желательно больше независимых "
-                "источников."
+                "Найдены релевантные источники, которые подтверждают "
+                "или косвенно подтверждают утверждение."
             )
 
         elif relevant_sources:
