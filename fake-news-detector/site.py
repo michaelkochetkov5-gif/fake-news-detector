@@ -180,14 +180,6 @@ user_input = st.text_area(
     placeholder="Введите текст новости, факта или утверждения..."
 )
 
-theme_choice = st.selectbox(
-    "Тема новости (необязательно — если не уверены, оставьте «авто»):",
-    [
-        "авто", "общее", "еда", "учёба", "ии", "it", "наука",
-        "игры", "кино", "музыка", "спорт", "путешествия", "факты"
-    ]
-)
-
 col1, col2, col3 = st.columns([1, 1, 1])
 
 with col1:
@@ -241,7 +233,7 @@ if check_button or "example" in st.session_state:
         st.warning("⚠️ Пожалуйста, введите текст!")
     else:
         cache = load_cache()
-        cache_key = f"{text_to_check}||{theme_choice}"
+        cache_key = get_cache_key(text_to_check)
 
         if cache_key in cache:
             st.info("ℹ️ Результат загружен из кэша")
@@ -260,10 +252,7 @@ if check_button or "example" in st.session_state:
                     )
 
             with st.spinner("🌐 Проверка фактов и RSS-источников..."):
-                fact_result = fact_checker.verify(
-                    text_to_check,
-                    theme=theme_choice
-                )
+                fact_result = fact_checker.verify(text_to_check)
 
             cache[cache_key] = (
                 prediction,
@@ -321,8 +310,6 @@ if check_button or "example" in st.session_state:
             "спорт": "⚽", "путешествия": "✈️", "факты": "🧠",
             "общее": "📰"
         }
-
-        st.info(f"**Тема:** {theme_emoji.get(theme, '📰')} {theme}")
 
         col1, col2, col3 = st.columns(3)
 
