@@ -205,6 +205,52 @@ def make_search_queries(claim):
 
     return list(dict.fromkeys(queries))
 
+def get_page_text(url, max_length=12000):
+    if not url:
+        return ""
+
+    try:
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (compatible; FactChecker/1.0)"
+            )
+        }
+
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=10
+        )
+
+        if response.status_code != 200:
+            return ""
+
+        soup = BeautifulSoup(
+            response.text,
+            "html.parser"
+        )
+
+        for tag in soup([
+            "script",
+            "style",
+            "nav",
+            "header",
+            "footer",
+            "aside",
+            "form",
+            "button"
+        ]):
+            tag.decompose()
+
+        text = soup.get_text(separator=" ")
+
+        text = clean_text(text)
+
+        return text[:max_length]
+
+    except Exception:
+        return ""
+
 def search_duckduckgo(claim, max_results=10):
     cache_key = "ddg_" + get_cache_key(claim)
 
@@ -635,6 +681,30 @@ class FactChecker:
                 "url": result["link"],
                 "source": result["source"]
             })
+
+        # Открываем до 5 наиболее перспективных страниц
+        pages_to_open = []
+
+        for source in all_sources:
+            url = source.get("url", "")
+
+            if url and url not in pages_to_open:
+                pages_to_open.append(url)
+
+        pages_to_open = pages_to_open[:5]
+
+        for url in pages_to_open:
+            page_text = get_page_text(url)
+
+            if page_text:
+                for source in all_sources:
+                    if source.get("url") == url:
+                        source["body"] = (
+                            source.get("body", "") + " " +
+                            page_text
+                        )
+
+                        break
 
         support, evidence = estimate_support(text, all_sources)
 
