@@ -8,9 +8,6 @@ from main_code import FactChecker
 from scipy.special import expit
 from datetime import datetime
 
-def get_cache_key(text):
-    return hashlib.md5(text.encode("utf-8")).hexdigest()
-
 # ===== ФАКТЧЕКЕР =====
 @st.cache_resource
 def load_fact_checker():
@@ -31,6 +28,9 @@ def load_cache():
 def save_cache(cache):
     with open(CACHE_FILE, "w", encoding="utf-8") as file:
         json.dump(cache, file, ensure_ascii=False, indent=2, default=str)
+
+def get_cache_key(text):
+    return hashlib.md5(text.encode("utf-8")).hexdigest()
 
 # ===== СТИЛЕВОЙ ОКРАС =====
 @st.cache_resource
@@ -102,8 +102,7 @@ if "stats" not in st.session_state:
         "fake_style": 0,
         "truth_style": 0,
         "fake_fact": 0,
-        "truth_fact": 0,
-        "themes": {}
+        "truth_fact": 0
     }
 
 # ===== СТРАНИЦА =====
@@ -131,16 +130,12 @@ with st.sidebar:
 
     if st.session_state.history:
         for i, item in enumerate(reversed(st.session_state.history[-10:]), 1):
-            theme_emoji = {
-                "еда": "🍕", "учёба": "📚", "ии": "🤖", "наука": "🔬",
-                "it": "💻", "игры": "🎮", "кино": "🎬", "музыка": "🎵",
-                "спорт": "⚽", "путешествия": "✈️", "факты": "🧠",
-                "общее": "📰"
-            }
+            verdict_icon = (
+                "❌"
+                if item["fact_verdict"] == "ФЕЙК"
+                else "✅"
+            )
 
-            theme = item.get("theme", "общее")
-            emoji = theme_emoji.get(theme, "📰")
-            verdict_icon = "❌" if item["fact_verdict"] == "ФЕЙК" else "✅"
             short_text = (
                 item["text"][:30] + "..."
                 if len(item["text"]) > 30
@@ -148,7 +143,7 @@ with st.sidebar:
             )
 
             if st.button(
-                f"{emoji} {verdict_icon} {short_text}",
+                f"{verdict_icon} {short_text}",
                 key=f"history_{i}"
             ):
                 st.session_state["load_history"] = item
@@ -283,19 +278,11 @@ if check_button or "example" in st.session_state:
         elif fact_result["verdict"] == "ПРАВДА":
             st.session_state.stats["truth_fact"] += 1
 
-        theme = fact_result.get("theme", "общее")
-
-        if theme not in st.session_state.stats["themes"]:
-            st.session_state.stats["themes"][theme] = 0
-
-        st.session_state.stats["themes"][theme] += 1
-
         st.session_state.history.append({
             "text": text_to_check,
             "prediction": prediction,
             "confidence": confidence,
             "fact_verdict": fact_result["verdict"],
-            "theme": theme,
             "time": datetime.now().strftime("%H:%M"),
             "fact_result": fact_result,
             "lemmatized": lemmatized
@@ -307,13 +294,6 @@ if check_button or "example" in st.session_state:
         # ===== РЕЗУЛЬТАТЫ =====
         st.markdown("---")
         st.subheader("📊 Результат анализа")
-
-        theme_emoji = {
-            "еда": "🍕", "учёба": "📚", "ии": "🤖", "наука": "🔬",
-            "it": "💻", "игры": "🎮", "кино": "🎬", "музыка": "🎵",
-            "спорт": "⚽", "путешествия": "✈️", "факты": "🧠",
-            "общее": "📰"
-        }
 
         col1, col2, col3 = st.columns(3)
 
@@ -432,34 +412,35 @@ if check_button or "example" in st.session_state:
         if fact_result.get("details"):
             st.markdown("---")
             st.subheader("🔗 Источники информации")
-        
+
             unique_details = []
             seen_links = set()
-        
+
             for detail in fact_result["details"]:
                 links = detail.get("links", [])
-        
+
                 for link in links:
                     if link and link not in seen_links:
                         seen_links.add(link)
-        
+
                         unique_details.append({
                             "link": link,
                             "reason": detail.get("reason", "")
                         })
-        
+
             for i, item in enumerate(unique_details[:10], 1):
                 st.markdown(
                     f"{i}. [{item['link']}]({item['link']}) "
                     f"*( {item['reason']} )*"
                 )
-        
+
             st.download_button(
                 label="📥 Скачать список ссылок",
                 data="\n".join(seen_links),
                 file_name="sources.txt",
                 mime="text/plain"
             )
+
         if fact_result.get("details"):
             with st.expander("🔍 Детали проверки фактов"):
                 for detail in fact_result["details"]:
