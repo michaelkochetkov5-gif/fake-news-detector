@@ -430,44 +430,36 @@ if check_button or "example" in st.session_state:
 
         # ===== ИСТОЧНИКИ =====
         if fact_result.get("details"):
-            all_links = []
-
+            st.markdown("---")
+            st.subheader("🔗 Источники информации")
+        
+            unique_details = []
+            seen_links = set()
+        
             for detail in fact_result["details"]:
                 links = detail.get("links", [])
-
-                if links:
-                    all_links.extend(links)
-
-            if all_links:
-                st.markdown("---")
-                st.subheader("🔗 Источники информации")
-
-                unique_links = list(dict.fromkeys(all_links))[:10]
-
-                for i, link in enumerate(unique_links, 1):
-                    matching_detail = next(
-                        (
-                            detail for detail in fact_result["details"]
-                            if link in detail.get("links", [])
-                        ),
-                        None
-                    )
-
-                    if matching_detail:
-                        st.markdown(
-                            f"{i}. [{link}]({link}) "
-                            f"*( {matching_detail['reason']} )*"
-                        )
-                    else:
-                        st.markdown(f"{i}. [{link}]({link})")
-
-                st.download_button(
-                    label="📥 Скачать список ссылок",
-                    data="\n".join(unique_links),
-                    file_name="sources.txt",
-                    mime="text/plain"
+        
+                for link in links:
+                    if link and link not in seen_links:
+                        seen_links.add(link)
+        
+                        unique_details.append({
+                            "link": link,
+                            "reason": detail.get("reason", "")
+                        })
+        
+            for i, item in enumerate(unique_details[:10], 1):
+                st.markdown(
+                    f"{i}. [{item['link']}]({item['link']}) "
+                    f"*( {item['reason']} )*"
                 )
-
+        
+            st.download_button(
+                label="📥 Скачать список ссылок",
+                data="\n".join(seen_links),
+                file_name="sources.txt",
+                mime="text/plain"
+            )
         if fact_result.get("details"):
             with st.expander("🔍 Детали проверки фактов"):
                 for detail in fact_result["details"]:
