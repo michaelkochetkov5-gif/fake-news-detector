@@ -230,22 +230,43 @@ def search_wikipedia(claim, max_results=3):
 
     results = []
 
+    queries = [claim]
+
+    claim_lower = claim.lower()
+
+    if "земля" in claim_lower:
+        queries.append("Земля")
+
+    if "круглая" in claim_lower or "шара" in claim_lower:
+        queries.append("Форма Земли")
+
     try:
         import wikipedia
 
-        search_results = wikipedia.search(claim, results=max_results)
-
-        for title in search_results:
+        for query in queries:
             try:
-                page = wikipedia.page(title, auto_suggest=False)
+                search_results = wikipedia.search(
+                    query,
+                    results=max_results
+                )
 
-                results.append({
-                    "title": page.title,
-                    "summary": page.summary,
-                    "body": page.summary,
-                    "url": page.url,
-                    "source": "Wikipedia"
-                })
+                for title in search_results:
+                    try:
+                        page = wikipedia.page(
+                            title,
+                            auto_suggest=False
+                        )
+
+                        results.append({
+                            "title": page.title,
+                            "summary": page.summary,
+                            "body": page.summary,
+                            "url": page.url,
+                            "source": "Wikipedia"
+                        })
+
+                    except Exception:
+                        continue
 
             except Exception:
                 continue
@@ -253,26 +274,18 @@ def search_wikipedia(claim, max_results=3):
     except Exception:
         pass
 
-    if not results:
-        try:
-            import wikipedia
+    unique_results = []
 
-            page = wikipedia.page("Земля", auto_suggest=False)
+    seen_urls = set()
 
-            results.append({
-                "title": page.title,
-                "summary": page.summary,
-                "body": page.summary,
-                "url": page.url,
-                "source": "Wikipedia"
-            })
+    for result in results:
+        if result["url"] not in seen_urls:
+            seen_urls.add(result["url"])
+            unique_results.append(result)
 
-        except Exception:
-            pass
+    search_cache[cache_key] = unique_results
 
-    search_cache[cache_key] = results
-
-    return results
+    return unique_results
 
 
 def extract_matching_sentences(claim, text):
