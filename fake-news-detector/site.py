@@ -1,97 +1,476 @@
 import streamlit as st
+import joblib
+import re
+import json
+import hashlib
+from pymorphy3 import MorphAnalyzer
 from main_code import FactChecker
+from scipy.special import expit
+from datetime import datetime
 
+# ===== ФАКТЧЕКЕР =====
+@st.cache_resource
+def load_fact_checker():
+    return FactChecker()
+
+fact_checker = load_fact_checker()
+
+# ===== КЭШ ПРОВЕРОК =====
+CACHE_FILE = "cache.json"
+
+def load_cache():
+    try:
+        with open(CACHE_FILE, "r", encoding="utf-8") as file:
+            return json.load(file)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def save_cache(cache):
+    with open(CACHE_FILE, "w", encoding="utf-8") as file:
+        json.dump(cache, file, ensure_ascii=False, indent=2, default=str)
+
+def get_cache_key(text):
+    return hashlib.md5(text.encode("utf-8")).hexdigest()
+
+# ===== СТИЛЕВОЙ ОКРАС =====
+@st.cache_resource
+def load_style_model():
+    try:
+        model = joblib.load(
+            "fake-news-detector/russian_fake_news_model_lemma_best.pkl"
+        )
+        vectorizer = joblib.load(
+            "fake-news-detector/russian_fake_news_vectorizer_lemma.pkl"
+        )
+        return model, vectorizer
+    except (FileNotFoundError, OSError):
+        return None, None
+
+model, vectorizer = load_style_model()
+morph = MorphAnalyzer()
+
+# ===== ФУНКЦИИ =====
+def clean_text(text):
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"http\S+|www\S+", "", text)
+    text = re.sub(r"\S+@\S+", "", text)
+    text = re.sub(r"@\w+", "", text)
+    text = re.sub(r"#", "", text)
+    text = re.sub(r"[^\w\s.,!?;:()\-\"]", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text.lower()
+
+def lemmatize_text(text):
+    words = text.split()
+    lemmas = []
+
+    for word in words:
+        if word.isalpha() and len(word) > 1:
+            try:
+                lemmas.append(morph.parse(word)[0].normal_form)
+            except Exception:
+                lemmas.append(word)
+
+    return " ".join(lemmas)
+
+def analyze_style(text):
+    if model is None or vectorizer is None:
+        return None, 0.0, ""
+
+    cleaned = clean_text(text)
+    lemmatized = lemmatize_text(cleaned)
+    vectorized = vectorizer.transform([lemmatized])
+
+    prediction = model.predict(vectorized)[0]
+
+    try:
+        probabilities = model.predict_proba(vectorized)[0]
+        confidence = max(probabilities) * 100
+    except Exception:
+        decision = model.decision_function(vectorized)[0]
+        confidence = expit(decision) * 100
+
+    return prediction, confidence, lemmatized
+
+# ===== SESSION STATE =====
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+if "stats" not in st.session_state:
+    st.session_state.stats = {
+        "total": 0,
+        "fake_style": 0,
+        "truth_style": 0,
+        "fake_fact": 0,
+        "truth_fact": 0
+    }
+
+# ===== СТРАНИЦА =====
 st.set_page_config(
-    page_title="Детектор фейковых новостей",
-    page_icon="🔍",
+    page_title="🔍 Детектор Фейков",
+    page_icon="🕵️",
     layout="wide"
 )
 
-st.title("🔍 Детектор фейковых новостей + фактчекинг")
+st.title("🔍 Детектор Фейковых Новостей + Фактчекинг")
+st.markdown("---")
 
-st.write(
-    "Введите утверждение или новость — сервис найдёт источники, "
-    "проверит их релевантность и покажет ключевые цитаты."
-)
+# ===== БОКОВАЯ ПАНЕЛЬ =====
+with st.sidebar:
+    st.header("📈 Статистика")
+    stats = st.session_state.stats
 
-checker = FactChecker()
+    st.metric("Всего проверок", stats["total"])
+    st.metric("Фейков (стилевой окрас)", stats["fake_style"])
+    st.metric("Правд (стилевой окрас)", stats["truth_style"])
+    st.metric("Фейков (факты)", stats["fake_fact"])
+    st.metric("Правд (факты)", stats["truth_fact"])
 
-user_text = st.text_area(
-    "Введите текст для проверки:",
-    height=120,
-    placeholder="Например: Земля имеет форму шара"
-)
+    st.header("📜 История")
 
-check_button = st.button("Проверить факт")
-
-if check_button:
-    if not user_text.strip():
-        st.warning("Введите текст для проверки.")
-        st.stop()
-
-    with st.spinner("Ищу источники и проверяю утверждение..."):
-        result = checker.check_fact(user_text.strip())
-
-    label = result["label"]
-    score = result["score"]
-    details = result["details"]
-    explanation = result["explanation"]
-
-    confidence_percent = int(round(score * 100))
-
-    st.subheader("📊 Результат анализа")
-
-    if label == "ПРАВДА":
-        st.success(f"✅ {label} ({confidence_percent}%)")
-    elif label == "ФЕЙК":
-        st.error(f"❌ {label} ({confidence_percent}%)")
-    else:
-        st.warning(f"⚠️ {label} ({confidence_percent}%)")
-
-    st.info(explanation)
-
-    st.subheader("🔗 Источники информации")
-
-    if not details:
-        st.warning(
-            "Не найдено релевантных источников для проверки утверждения."
-        )
-
-    else:
-        for i, item in enumerate(details, start=1):
-            fact = item.get("fact", "")
-            source = item.get("source", "")
-            reason = item.get("reason", "")
-            links = item.get("links", [])
-            item_result = item.get("result")
-
-            if item_result is True:
-                status_icon = "✅"
-            elif item_result is False:
-                status_icon = "❌"
-            else:
-                status_icon = "➖"
-
-            st.markdown(
-                f"""
-                **{i}. {status_icon} {fact}**  
-                *Источник: {source}*
-
-                {reason}
-                """
+    if st.session_state.history:
+        for i, item in enumerate(reversed(st.session_state.history[-10:]), 1):
+            verdict_icon = (
+                "❌"
+                if item["fact_verdict"] == "ФЕЙК"
+                else "✅"
             )
 
-            if links:
-                for link in links:
-                    if link:
-                        st.markdown(
-                            f"[Открыть источник]({link})"
-                        )
+            short_text = (
+                item["text"][:30] + "..."
+                if len(item["text"]) > 30
+                else item["text"]
+            )
 
-            st.divider()
+            if st.button(
+                f"{verdict_icon} {short_text}",
+                key=f"history_{i}"
+            ):
+                st.session_state["load_history"] = item
 
-else:
-    st.info(
-        "Введите утверждение и нажмите «Проверить факт», "
-        "чтобы начать проверку."
+        st.session_state["load_history"] = None
+    else:
+        st.write("Пока нет проверок")
+
+    st.header("📝 Примеры")
+    st.markdown("""
+    **🔬 Наука:**  
+    - Земля круглая
+
+    **🍕 Еда:**  
+    - Сахар вызывает зависимость
+
+    **🤖 ИИ:**  
+    - ChatGPT заменит программистов
+
+    **🎮 Игры:**  
+    - Minecraft закроют навсегда
+    """)
+
+# ===== ОСНОВНОЙ ИНТЕРФЕЙС =====
+st.write("**Введите текст для проверки:**")
+
+user_input = st.text_area(
+    "Текст",
+    height=200,
+    placeholder="Введите текст новости, факта или утверждения..."
+)
+
+col1, col2, col3 = st.columns([1, 1, 1])
+
+with col1:
+    check_button = st.button(
+        "🔍 Проверить",
+        type="primary",
+        use_container_width=True
     )
+
+with col2:
+    clear_button = st.button("🗑️ Очистить", use_container_width=True)
+
+with col3:
+    examples_button = st.button("📚 Примеры", use_container_width=True)
+
+if clear_button:
+    for key in [
+        "example", "fact_result", "prediction",
+        "confidence", "lemmatized"
+    ]:
+        if key in st.session_state:
+            del st.session_state[key]
+
+    st.rerun()
+
+if examples_button:
+    st.session_state["example"] = "Земля круглая"
+
+if st.session_state.get("load_history"):
+    item = st.session_state["load_history"]
+
+    st.session_state["example"] = item["text"]
+    st.session_state["fact_result"] = item["fact_result"]
+    st.session_state["prediction"] = item["prediction"]
+    st.session_state["confidence"] = item["confidence"]
+    st.session_state["lemmatized"] = item["lemmatized"]
+    st.session_state["load_history"] = None
+
+    st.rerun()
+
+if check_button or "example" in st.session_state:
+    text_to_check = (
+        st.session_state.get("example", user_input)
+        if "example" in st.session_state
+        else user_input
+    )
+
+    if text_to_check.strip() == "":
+        st.warning("⚠️ Пожалуйста, введите текст!")
+    else:
+        cache = load_cache()
+        cache_key = get_cache_key(text_to_check)
+
+        if cache_key in cache:
+            st.info("ℹ️ Результат загружен из кэша")
+            prediction, confidence, lemmatized, fact_result = cache[cache_key]
+        else:
+            word_count = len(text_to_check.split())
+
+            if word_count < 8:
+                prediction = None
+                confidence = 0.0
+                lemmatized = lemmatize_text(clean_text(text_to_check))
+            else:
+                with st.spinner("🔄 Анализ стилевого окраса..."):
+                    prediction, confidence, lemmatized = analyze_style(
+                        text_to_check
+                    )
+
+            with st.spinner("🌐 Проверка фактов, Wikipedia и RSS..."):
+                fact_result = fact_checker.verify(text_to_check)
+
+            cache[cache_key] = (
+                prediction,
+                confidence,
+                lemmatized,
+                fact_result
+            )
+            save_cache(cache)
+
+        st.session_state["fact_result"] = fact_result
+        st.session_state["prediction"] = prediction
+        st.session_state["confidence"] = confidence
+        st.session_state["lemmatized"] = lemmatized
+
+        st.session_state.stats["total"] += 1
+
+        if prediction == 0:
+            st.session_state.stats["fake_style"] += 1
+        elif prediction == 1:
+            st.session_state.stats["truth_style"] += 1
+
+        if fact_result["verdict"] == "ФЕЙК":
+            st.session_state.stats["fake_fact"] += 1
+        elif fact_result["verdict"] == "ПРАВДА":
+            st.session_state.stats["truth_fact"] += 1
+
+        st.session_state.history.append({
+            "text": text_to_check,
+            "prediction": prediction,
+            "confidence": confidence,
+            "fact_verdict": fact_result["verdict"],
+            "time": datetime.now().strftime("%H:%M"),
+            "fact_result": fact_result,
+            "lemmatized": lemmatized
+        })
+
+        if len(st.session_state.history) > 20:
+            st.session_state.history = st.session_state.history[-20:]
+
+        # ===== РЕЗУЛЬТАТЫ =====
+        st.markdown("---")
+        st.subheader("📊 Результат анализа")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.metric("Длина текста", f"{len(text_to_check)} симв.")
+
+        with col2:
+            st.metric(
+                "Слов после лемматизации",
+                f"{len(lemmatized.split())}"
+            )
+
+        with col3:
+            if prediction is None:
+                st.metric("Уверенность стилевого окраса", "—")
+            else:
+                st.metric(
+                    "Уверенность стилевого окраса",
+                    f"{confidence:.1f}%"
+                )
+
+        st.markdown("---")
+
+        col_fact, col_style = st.columns(2)
+
+        with col_fact:
+            st.markdown("### 🔍 Фактчекинг")
+
+            if fact_result["verdict"] == "ПРАВДА":
+                st.success(
+                    f"✅ {fact_result['verdict']} "
+                    f"({fact_result['confidence']:.0%})"
+                )
+            elif fact_result["verdict"] == "ФЕЙК":
+                st.error(
+                    f"❌ {fact_result['verdict']} "
+                    f"({fact_result['confidence']:.0%})"
+                )
+            else:
+                st.warning(
+                    f"⚠️ {fact_result['verdict']} "
+                    f"({fact_result['confidence']:.0%})"
+                )
+
+            st.info(f"📖 {fact_result['reason']}")
+
+        with col_style:
+            st.markdown("### 🎨 Стилевой окрас")
+
+            if prediction is None:
+                st.info(
+                    "➖ Не применялся: короткое утверждение, "
+                    "решение принимается по фактам."
+                )
+            elif prediction == 0:
+                st.error(f"❌ ФЕЙК ({confidence:.1f}%)")
+            else:
+                st.success(f"✅ ПРАВДА ({confidence:.1f}%)")
+
+        # ===== ИТОГ =====
+        st.markdown("---")
+        st.subheader("🎯 Итоговый вердикt")
+
+        if fact_result["verdict"] == "ФЕЙК":
+            st.error(
+                "❌ **ФЕЙКОВАЯ НОВОСТЬ** "
+                "(не соответствует фактам)"
+            )
+            st.write(f"**Причина:** {fact_result['reason']}")
+
+        elif fact_result["verdict"] == "ПРАВДА":
+            st.success(
+                "✅ **ПРАВДИВАЯ НОВОСТЬ** "
+                "(подтверждено фактами)"
+            )
+            st.write(f"**Причина:** {fact_result['reason']}")
+
+        elif prediction is None:
+            st.warning(
+                "⚠️ **НЕ УДАЛОСЬ НАДЁЖНО ПРОВЕРИТЬ** "
+                "(короткое утверждение)"
+            )
+            st.write(f"**Причина:** {fact_result['reason']}")
+
+        elif (
+            fact_result["verdict"] == "НЕИЗВЕСТНО"
+            and confidence < 70
+        ):
+            st.warning(
+                "⚠️ **НЕДОСТАТОЧНО ДАННЫХ "
+                "ДЛЯ НАДЁЖНОГО ВЕРДИКТА**"
+            )
+            st.write(f"**Причина:** {fact_result['reason']}")
+            st.write(
+                f"**Стилевой окрас:** "
+                f"{'ФЕЙК' if prediction == 0 else 'ПРАВДА'} "
+                f"({confidence:.1f}%)"
+            )
+
+        elif (
+            fact_result["verdict"] == "НЕИЗВЕСТНО"
+            and prediction == 0
+        ):
+            st.error(
+                "❌ **Вероятно ФЕЙК** (стилевой окрас)"
+            )
+            st.write(f"**Уверенность:** {confidence:.1f}%")
+
+        else:
+            st.success(
+                "✅ **Вероятно ПРАВДА** (стилевой окрас)"
+            )
+            st.write(f"**Уверенность:** {confidence:.1f}%")
+
+        # ===== ИСТОЧНИКИ =====
+        if fact_result.get("details"):
+            st.markdown("---")
+            st.subheader("🔗 Источники информации")
+
+            unique_details = []
+            seen_links = set()
+
+            for detail in fact_result["details"]:
+                links = detail.get("links", [])
+
+                for link in links:
+                    if link and link not in seen_links:
+                        seen_links.add(link)
+
+                        unique_details.append({
+                            "link": link,
+                            "reason": detail.get("reason", "")
+                        })
+
+            for i, item in enumerate(unique_details[:10], 1):
+                st.markdown(
+                    f"{i}. [{item['link']}]({item['link']}) "
+                    f"*( {item['reason']} )*"
+                )
+
+            st.download_button(
+                label="📥 Скачать список ссылок",
+                data="\n".join(seen_links),
+                file_name="sources.txt",
+                mime="text/plain"
+            )
+
+        if fact_result.get("details"):
+            with st.expander("🔍 Детали проверки фактов"):
+                for detail in fact_result["details"]:
+                    icon = (
+                        "✅" if detail["result"] is True
+                        else "❌" if detail["result"] is False
+                        else "⚠️"
+                    )
+
+                    st.write(f"{icon} **{detail['fact']}**")
+                    st.write(f"   *Источник:* {detail['source']}")
+                    st.write(f"   *{detail['reason']}*")
+
+                    links = detail.get("links", [])
+
+                    if links:
+                        st.write("   **Ссылки:**")
+
+                        for link in links:
+                            st.markdown(
+                                f"   - [{link}]({link}) "
+                                f"*( {detail['reason']} )*"
+                            )
+
+                    st.divider()
+
+        with st.expander("🔧 Предобработанный текст"):
+            st.code(lemmatized)
+
+        if st.button("🔄 Проверить ещё один текст"):
+            for key in [
+                "example", "fact_result", "prediction",
+                "confidence", "lemmatized"
+            ]:
+                if key in st.session_state:
+                    del st.session_state[key]
+
+            st.rerun()
