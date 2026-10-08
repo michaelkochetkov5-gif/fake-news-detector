@@ -5,7 +5,6 @@ import re
 import json
 import os
 import time
-from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
 
@@ -47,48 +46,52 @@ def get_cache_key(text):
     return re.sub(r"[^a-zа-яё0-9]+", "_", text.lower()).strip("_")
 
 STOP_WORDS = {
-    "это", "этот", "эта", "эти", "того", "того", "такой", "такая",
-    "такие", "есть", "был", "была", "были", "будет", "будут",
-    "очень", "более", "менее", "самый", "самая", "самые",
-    "который", "которая", "которые", "чтобы", "потому", "поэтому",
-    "также", "тоже", "вот", "там", "тут", "или", "и", "а", "но",
-    "не", "ни", "да", "нет", "как", "что", "чем", "при", "для",
-    "от", "до", "из", "по", "за", "на", "в", "во", "со", "с", "у",
-    "о", "об", "обо", "над", "под", "про", "через", "между"
+    "это", "этот", "эта", "эти", "того", "такой", "такая", "такие",
+    "есть", "был", "была", "были", "будет", "будут", "очень",
+    "более", "менее", "самый", "самая", "самые", "который",
+    "которая", "которые", "чтобы", "потому", "поэтому", "также",
+    "тоже", "вот", "там", "тут", "или", "и", "а", "но", "не", "ни",
+    "да", "нет", "как", "что", "чем", "при", "для", "от", "до",
+    "из", "по", "за", "на", "в", "во", "со", "с", "у", "о", "об",
+    "обо", "над", "под", "про", "через", "между", "имеет", "является"
 }
 
 SYNONYMS = {
     "круглая": [
-        "круглая", "шарообразная", "форме шара",
-        "сферическая", "геоид", "эллипсоид"
+        "круглая", "шарообразная", "форме шара", "форме шара",
+        "сферическая", "геоид", "эллипсоид", "форма земли"
     ],
     "шара": [
-        "шара", "шарообразная", "круглая",
-        "сферическая", "геоид", "эллипсоид"
+        "шара", "шарообразная", "круглая", "сферическая",
+        "геоид", "эллипсоид", "форма земли"
     ],
     "форма": [
-        "форма", "форме", "формы", "имеет форму"
-    ],
-    "вреден": [
-        "вреден", "вредна", "вредно", "опасен", "опасна", "опасно"
-    ],
-    "опасен": [
-        "вреден", "вредна", "вредно", "опасен", "опасна", "опасно"
-    ],
-    "вызывает": [
-        "вызывает", "приводит", "связан", "связана", "влияет"
-    ],
-    "лечит": [
-        "лечит", "помогает", "эффективен", "эффективна"
-    ],
-    "запретят": [
-        "запретят", "запрет", "запрещён", "запрещено"
-    ],
-    "отменят": [
-        "отменят", "отмена", "отменён", "отменено"
+        "форма", "форме", "формы", "имеет форму", "форма земли"
     ],
     "земля": [
-        "земля", "планета земля", "наша планета"
+        "земля", "планета земля", "наша планета", "форма земли"
+    ],
+    "вреден": [
+        "вреден", "вредна", "вредно", "опасен", "опасна", "опасно",
+        "негативно влияет", "негативное влияние"
+    ],
+    "опасен": [
+        "вреден", "вредна", "вредно", "опасен", "опасна", "опасно",
+        "негативно влияет", "негативное влияние"
+    ],
+    "вызывает": [
+        "вызывает", "приводит", "приводит к", "связан",
+        "связана", "влияет", "влияние"
+    ],
+    "лечит": [
+        "лечит", "помогает", "эффективен", "эффективна",
+        "эффективность", "терапия"
+    ],
+    "запретят": [
+        "запретят", "запрет", "запрещён", "запрещено", "запрещать"
+    ],
+    "отменят": [
+        "отменят", "отмена", "отменён", "отменено", "отменять"
     ]
 }
 
@@ -112,7 +115,17 @@ def clean_text(text):
 
     return text.strip()
 
-def search_duckduckgo(claim, max_results=5):
+def get_claim_words(text):
+    words = re.findall(r"[а-яёa-z]{4,}", text.lower())
+
+    words = [
+        word for word in words
+        if word not in STOP_WORDS
+    ]
+
+    return expand_keywords(list(dict.fromkeys(words)))
+
+def search_duckduckgo(claim, max_results=6):
     cache_key = "ddg_" + get_cache_key(claim)
 
     if cache_key in search_cache:
@@ -246,12 +259,7 @@ def get_relevant_articles(claim, max_articles=5):
         if current_time - cached.get("time", 0) < 3600:
             return cached.get("articles", [])
 
-    claim_words = [
-        word for word in re.findall(r"[а-яёa-z]{4,}", claim.lower())
-        if word not in STOP_WORDS
-    ]
-
-    claim_words = expand_keywords(claim_words)
+    claim_words = get_claim_words(claim)
 
     articles = []
 
@@ -259,31 +267,48 @@ def get_relevant_articles(claim, max_articles=5):
         try:
             parsed_feed = feedparser.parse(feed["url"])
 
-            for entry in parsed_feed.entries[:30]:
+            for entry in parsed_feed.entries[:50]:
                 title = clean_text(entry.get("title", ""))
                 summary = clean_text(entry.get("summary", ""))
 
                 text = (title + " " + summary).lower()
 
-                matches = [
-                    word for word in claim_words
-                    if word in text
-                ]
+                matched_words = []
 
-                if matches:
+                for word in claim_words:
+                    if word in text:
+                        matched_words.append(word)
+
+                unique_matches = list(dict.fromkeys(matched_words))
+
+                coverage = len(unique_matches) / max(len(claim_words), 1)
+
+                is_relevant = (
+                    len(unique_matches) >= 2
+                    and coverage >= 0.4
+                )
+
+                if is_relevant:
                     articles.append({
                         "title": title,
                         "summary": summary,
                         "link": entry.get("link", ""),
                         "source": feed["name"],
                         "published": entry.get("published", ""),
-                        "matches": len(matches)
+                        "matches": len(unique_matches),
+                        "coverage": coverage
                     })
 
         except Exception:
             continue
 
-    articles.sort(key=lambda item: item["matches"], reverse=True)
+    articles.sort(
+        key=lambda item: (
+            item["coverage"],
+            item["matches"]
+        ),
+        reverse=True
+    )
 
     articles = articles[:max_articles]
 
@@ -296,22 +321,17 @@ def get_relevant_articles(claim, max_articles=5):
 
     return articles
 
-def extract_matching_sentences(claim, text):
+def find_best_sentence(claim, text):
     sentences = re.split(r"(?<=[.!?])\s+", text)
 
-    claim_words = [
-        word for word in re.findall(r"[а-яёa-z]{4,}", claim.lower())
-        if word not in STOP_WORDS
-    ]
+    claim_words = get_claim_words(claim)
 
-    claim_words = expand_keywords(claim_words)
-
-    matches = []
+    best_match = None
 
     for sentence in sentences:
         sentence_clean = sentence.strip()
 
-        if len(sentence_clean) < 20:
+        if len(sentence_clean) < 40:
             continue
 
         sentence_lower = sentence_clean.lower()
@@ -322,32 +342,30 @@ def extract_matching_sentences(claim, text):
             if word in sentence_lower:
                 matched_words.append(word)
 
-        coverage = len(matched_words) / max(len(claim_words), 1)
+        unique_matches = list(dict.fromkeys(matched_words))
 
-        if coverage >= 0.4:
+        coverage = len(unique_matches) / max(len(claim_words), 1)
+
+        if coverage >= 0.5:
             status = "подтверждает"
-        elif coverage >= 0.15:
+        elif coverage >= 0.3:
             status = "косвенно подтверждает"
-        elif coverage > 0:
+        elif coverage >= 0.15:
             status = "связан с темой утверждения"
         else:
             continue
 
-        matches.append({
-            "sentence": sentence_clean,
-            "status": status,
-            "coverage": coverage
-        })
+        if best_match is None or coverage > best_match["coverage"]:
+            best_match = {
+                "sentence": sentence_clean,
+                "status": status,
+                "coverage": coverage
+            }
 
-    matches.sort(key=lambda item: item["coverage"], reverse=True)
-
-    return matches[:2]
+    return best_match
 
 def estimate_support(claim, sources):
-    claim_words = [
-        word for word in re.findall(r"[а-яёa-z]{4,}", claim.lower())
-        if word not in STOP_WORDS
-    ]
+    claim_words = get_claim_words(claim)
 
     if not claim_words:
         return 0.0, []
@@ -362,23 +380,21 @@ def estimate_support(claim, sources):
             source.get("body", "")
         )
 
-        matches = extract_matching_sentences(claim, text)
+        best_match = find_best_sentence(claim, text)
 
-        if matches:
-            best = matches[0]
-
+        if best_match:
             evidence.append({
                 "title": source.get("title", ""),
                 "url": source.get("url", ""),
                 "source": source.get("source", ""),
-                "sentence": best["sentence"],
-                "status": best["status"],
-                "coverage": best["coverage"]
+                "sentence": best_match["sentence"],
+                "status": best_match["status"],
+                "coverage": best_match["coverage"]
             })
 
-            if best["status"] == "подтверждает":
+            if best_match["status"] == "подтверждает":
                 support_score += 1.0
-            elif best["status"] == "косвенно подтверждает":
+            elif best_match["status"] == "косвенно подтверждает":
                 support_score += 0.5
             else:
                 support_score += 0.2
@@ -448,8 +464,42 @@ class FactChecker:
                 )
             })
 
+        relevant_sources = []
+
+        claim_words = get_claim_words(text)
+
+        for source in all_sources:
+            source_text = (
+                source.get("title", "") + " " +
+                source.get("summary", "") + " " +
+                source.get("body", "")
+            ).lower()
+
+            matched_words = []
+
+            for word in claim_words:
+                if word in source_text:
+                    matched_words.append(word)
+
+            unique_matches = list(dict.fromkeys(matched_words))
+
+            coverage = len(unique_matches) / max(len(claim_words), 1)
+
+            if len(unique_matches) >= 2 and coverage >= 0.4:
+                relevant_sources.append({
+                    "source": source,
+                    "coverage": coverage
+                })
+
+        relevant_sources.sort(
+            key=lambda item: item["coverage"],
+            reverse=True
+        )
+
         if not details:
-            for source in all_sources[:8]:
+            for item in relevant_sources[:8]:
+                source = item["source"]
+
                 sentences = re.split(
                     r"(?<=[.!?])\s+",
                     (
@@ -479,28 +529,44 @@ class FactChecker:
                     "result": None
                 })
 
-        if support >= 0.7 and len(evidence) >= 2:
+        strong_evidence = [
+            item for item in evidence
+            if item["status"] in [
+                "подтверждает",
+                "косвенно подтверждает"
+            ]
+        ]
+
+        if len(strong_evidence) >= 2 and support >= 0.5:
             verdict = "ПРАВДА"
-            confidence = min(0.55 + support * 0.35, 0.92)
+            confidence = min(0.6 + support * 0.3, 0.9)
             reason = (
-                "Найдены источники, подтверждающие или косвенно "
-                "подтверждающие утверждение."
+                "Найдено несколько релевантных источников, которые "
+                "подтверждают или косвенно подтверждают утверждение."
             )
 
-        elif support <= 0.2 and len(all_sources) >= 3:
-            verdict = "ФЕЙК"
-            confidence = min(0.55 + (1 - support) * 0.3, 0.88)
+        elif len(strong_evidence) == 1 and support >= 0.35:
+            verdict = "НЕИЗВЕСТНО"
+            confidence = 0.55
             reason = (
-                "Релевантные источники не подтверждают утверждение "
-                "или противоречат его основной мысли."
+                "Найден один релевантный источник, но его недостаточно "
+                "для надёжного подтверждения утверждения."
+            )
+
+        elif relevant_sources:
+            verdict = "НЕИЗВЕСТНО"
+            confidence = 0.5
+            reason = (
+                "Найдены источники по теме, но они не содержат "
+                "достаточно точного подтверждения или опровержения."
             )
 
         else:
             verdict = "НЕИЗВЕСТНО"
             confidence = 0.5
             reason = (
-                "Найдены источники по теме, но их недостаточно "
-                "для надёжного подтверждения или опровержения."
+                "Не найдено достаточного количества действительно "
+                "релевантных источников для проверки утверждения."
             )
 
         return {
