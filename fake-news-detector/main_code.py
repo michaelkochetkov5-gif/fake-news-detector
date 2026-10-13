@@ -134,6 +134,52 @@ TRUSTED_DOMAINS = {
     "bbc.com": 0.8,
     "reuters.com": 0.9,
     "apnews.com": 0.9
+    
+    # Профессиональная проверка фактов
+    "politifact.com": 0.95,
+    "factcheck.afp.com": 0.95,
+    "reuters.com/fact-check": 0.95,
+    "fullfact.org": 0.9,
+    "aap.com.au": 0.85,
+
+    # Международные организации
+    "unesco.org": 0.95,
+    "wto.org": 0.9,
+    "ilo.org": 0.9,
+    "fao.org": 0.9,
+    "ifad.org": 0.9,
+    "oecd.org": 0.95,
+    "nato.int": 0.85,
+    "europa.eu": 0.9,
+
+    # Медицина и наука
+    "hhs.gov": 0.95,
+    "fda.gov": 1.0,
+    "ema.europa.eu": 0.95,
+    "nature.com": 0.95,
+    "science.org": 0.95,
+    "sciencedirect.com": 0.9,
+    "springer.com": 0.9,
+    "bmj.com": 0.95,
+    "thelancet.com": 0.95,
+
+    # Климат и окружающая среда
+    "copernicus.eu": 0.95,
+    "carbonbrief.org": 0.8,
+
+    # История, культура и энциклопедии
+    "britannica.com": 0.9,
+    "oxfordreference.com": 0.95,
+    "cambridge.org": 0.95,
+
+    # Технологии и ИИ
+    "nist.gov": 0.95,
+    "openai.com": 0.8,
+    "huggingface.co": 0.8,
+
+    # Право и безопасность
+    "eur-lex.europa.eu": 0.95,
+    "justice.gov": 0.9
 }
 
 CONTRADICTION_WORDS = [
