@@ -90,6 +90,7 @@ SYNONYMS = {
     ]
 }
 
+TRUSTED_DOMAINS = {
     # Медицина и здоровье
     "cdc.gov": 1.0,
     "nih.gov": 1.0,
@@ -140,6 +141,7 @@ SYNONYMS = {
     # Проверка фактов
     "snopes.com": 0.85,
     "factcheck.org": 0.9
+}
 
 CONTRADICTION_WORDS = [
     "не является", "не имеет", "не соответствует",
