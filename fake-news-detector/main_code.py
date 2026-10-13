@@ -48,99 +48,92 @@ STOP_WORDS = {
     "тоже", "вот", "там", "тут", "или", "и", "а", "но", "не", "ни",
     "да", "нет", "как", "что", "чем", "при", "для", "от", "до",
     "из", "по", "за", "на", "в", "во", "со", "с", "у", "о", "об",
-    "обо", "над", "под", "про", "через", "между", "имеет", "является"
+    "обо", "над", "под", "про", "через", "между", "имеет", "является",
+    "года", "году", "года", "прошёл", "прошел", "прошла", "прошли",
+    "состоялся", "состоялась", "состоялось"
 }
 
 SYNONYMS = {
     "круглая": [
-        "круглая", "шарообразная", "форме шара", "сферическая",
-        "геоид", "эллипсоид", "форма земли"
+        "круглая", "шарообразная", "сферическая",
+        "геоид", "эллипсоид"
     ],
     "шара": [
-        "шара", "шарообразная", "круглая", "сферическая",
-        "геоид", "эллипсоид", "форма земли"
-    ],
-    "форма": [
-        "форма", "форме", "формы", "имеет форму", "форма земли"
-    ],
-    "земля": [
-        "земля", "планета земля", "наша планета", "форма земли"
+        "шарообразная", "круглая", "сферическая",
+        "геоид", "эллипсоид"
     ],
     "вреден": [
-        "вреден", "вредна", "вредно", "опасен", "опасна", "опасно",
-        "негативно влияет", "негативное влияние"
+        "вредна", "вредно", "опасен", "опасна", "опасно"
     ],
     "опасен": [
-        "вреден", "вредна", "вредно", "опасен", "опасна", "опасно",
-        "негативно влияет", "негативное влияние"
+        "вреден", "вредна", "вредно", "опасна", "опасно"
     ],
     "вызывает": [
-        "вызывает", "приводит", "приводит к", "связан",
-        "связана", "влияет", "влияние"
+        "приводит", "связан", "связана", "влияет"
     ],
     "лечит": [
-        "лечит", "помогает", "эффективен", "эффективна",
-        "эффективность", "терапия"
+        "помогает", "эффективен", "эффективна"
     ],
     "запретят": [
-        "запретят", "запрет", "запрещён", "запрещено", "запрещать"
+        "запрет", "запрещён", "запрещено"
     ],
     "отменят": [
-        "отменят", "отмена", "отменён", "отменено", "отменять"
+        "отмена", "отменён", "отменено"
     ]
 }
 
 TRUSTED_DOMAINS = {
-    # Медицина и здоровье
+    "wikipedia.org": 1.0,
+    "nasa.gov": 1.0,
+    "science.nasa.gov": 1.0,
+    "who.int": 1.0,
+    "un.org": 0.9,
+    "gov.ru": 0.9,
+    "edu.ru": 0.9,
+    "edu": 0.8,
+
+    "ocw.mit.edu": 1.0,
+    "mit.edu": 0.95,
+    "khanacademy.org": 0.9,
+    "plato.stanford.edu": 1.0,
+    "stanford.edu": 0.95,
+    "ourworldindata.org": 0.95,
+    "scholar.google.com": 0.9,
+
+    "psychologytoday.com": 0.7,
+    "deeplearning.ai": 0.85,
+    "medlineplus.gov": 1.0,
+    "worldhistory.org": 0.85,
+    "core-econ.org": 0.9,
+    "greatergood.berkeley.edu": 0.9,
+    "iep.utm.edu": 0.9,
+    "freecodecamp.org": 0.8,
+    "startupschool.org": 0.75,
+    "firstdraftnews.org": 0.85,
+
     "cdc.gov": 1.0,
     "nih.gov": 1.0,
     "nimh.nih.gov": 1.0,
-
-    # Экономика и финансы
     "imf.org": 0.95,
     "worldbank.org": 0.95,
-    "bis.org": 0.9,
-
-    # Климат, экология и энергетика
     "ipcc.ch": 1.0,
     "unep.org": 0.95,
     "iea.org": 0.95,
-    "eia.gov": 0.9,
-
-    # Космос и наука
     "esa.int": 0.95,
     "nature.com": 0.95,
-
-    # ИИ и кибербезопасность
-    "ai.gov": 0.9,
-    "oecd.ai": 0.9,
     "cisa.gov": 0.95,
-    "ncsc.gov.uk": 0.9,
-
-    # Права человека и миграция
     "unhcr.org": 0.95,
-    "iom.int": 0.9,
     "ohchr.org": 0.95,
-    "amnesty.org": 0.8,
-
-    # История и энциклопедии
-    "britannica.com": 0.9,
-    "history.com": 0.75,
-
-    # Спорт
-    "olympics.com": 0.9,
-    "fifa.com": 0.8,
-
-    # Питание
-    "nutrition.org": 0.9,
-    "hsph.harvard.edu": 0.95,
-
-    # Погода
     "noaa.gov": 1.0,
-
-    # Проверка фактов
     "snopes.com": 0.85,
-    "factcheck.org": 0.9
+    "factcheck.org": 0.9,
+
+    "ria.ru": 0.7,
+    "tass.ru": 0.7,
+    "interfax.ru": 0.7,
+    "bbc.com": 0.8,
+    "reuters.com": 0.9,
+    "apnews.com": 0.9
 }
 
 CONTRADICTION_WORDS = [
@@ -148,17 +141,6 @@ CONTRADICTION_WORDS = [
     "опровергает", "опровергнуто", "ложно", "ложная",
     "фейк", "миф", "неверно", "неправда", "дезинформация"
 ]
-
-def expand_keywords(words):
-    expanded = []
-
-    for word in words:
-        expanded.append(word)
-
-        if word in SYNONYMS:
-            expanded.extend(SYNONYMS[word])
-
-    return list(dict.fromkeys(expanded))
 
 def clean_text(text):
     if not text:
@@ -177,7 +159,7 @@ def normalize_word(word):
 
     return word[:5]
 
-def get_claim_words(text):
+def get_base_words(text):
     words = re.findall(r"[а-яёa-z]{4,}", text.lower())
 
     words = [
@@ -185,11 +167,38 @@ def get_claim_words(text):
         if word not in STOP_WORDS
     ]
 
-    words = expand_keywords(list(dict.fromkeys(words)))
+    return list(dict.fromkeys(words))
+
+def get_claim_word_groups(text):
+    words = get_base_words(text)
+
+    groups = []
+
+    for word in words:
+        group = [normalize_word(word)]
+
+        if word in SYNONYMS:
+            for synonym in SYNONYMS[word]:
+                group.append(normalize_word(synonym))
+
+        groups.append(list(dict.fromkeys(group)))
+
+    return groups
+
+def get_claim_words(text):
+    words = get_base_words(text)
+
+    expanded = []
+
+    for word in words:
+        expanded.append(word)
+
+        if word in SYNONYMS:
+            expanded.extend(SYNONYMS[word])
 
     normalized = [
         normalize_word(word)
-        for word in words
+        for word in expanded
     ]
 
     return list(dict.fromkeys(normalized))
@@ -213,32 +222,13 @@ def get_domain_trust(url):
 def make_search_queries(claim):
     queries = [claim]
 
-    words = re.findall(r"[а-яёa-z]{4,}", claim.lower())
-
-    words = [
-        word for word in words
-        if word not in STOP_WORDS
-    ]
+    words = get_base_words(claim)
 
     if len(words) >= 2:
         queries.append(" ".join(words))
 
-    claim_lower = claim.lower()
-
-    if "земля" in claim_lower:
-        queries.append("Земля")
-
-    if "форма" in claim_lower:
-        queries.append("Форма Земли")
-
-    if "шара" in claim_lower or "круглая" in claim_lower:
-        queries.append("Земля сферическая")
-
-    if "вакцина" in claim_lower:
-        queries.append("вакцина безопасность исследования")
-
-    if "вред" in claim_lower or "вреден" in claim_lower:
-        queries.append("научные исследования влияние")
+    if len(words) >= 3:
+        queries.append(" ".join(words[:4]))
 
     return list(dict.fromkeys(queries))
 
@@ -494,7 +484,7 @@ def get_relevant_articles(claim, max_articles=5):
         if current_time - cached.get("time", 0) < 3600:
             return cached.get("articles", [])
 
-    claim_words = get_claim_words(claim)
+    claim_groups = get_claim_word_groups(claim)
 
     articles = []
 
@@ -518,24 +508,25 @@ def get_relevant_articles(claim, max_articles=5):
                     for word in text_words
                 }
 
-                matched_words = []
+                matched_groups = 0
 
-                for word in claim_words:
-                    if word in text_stems:
-                        matched_words.append(word)
+                for group in claim_groups:
+                    if any(
+                        word in text_stems
+                        for word in group
+                    ):
+                        matched_groups += 1
 
-                unique_matches = list(dict.fromkeys(matched_words))
+                coverage = matched_groups / max(len(claim_groups), 1)
 
-                coverage = len(unique_matches) / max(len(claim_words), 1)
-
-                if len(unique_matches) >= 2 or coverage >= 0.4:
+                if matched_groups >= 2 and coverage >= 0.35:
                     articles.append({
                         "title": title,
                         "summary": summary,
                         "link": entry.get("link", ""),
                         "source": feed["name"],
                         "published": entry.get("published", ""),
-                        "matches": len(unique_matches),
+                        "matches": matched_groups,
                         "coverage": coverage
                     })
 
@@ -564,7 +555,7 @@ def get_relevant_articles(claim, max_articles=5):
 def find_best_sentences(claim, text, max_sentences=3):
     sentences = re.split(r"(?<=[.!?])\s+", text)
 
-    claim_words = get_claim_words(claim)
+    claim_groups = get_claim_word_groups(claim)
 
     matches = []
 
@@ -586,28 +577,29 @@ def find_best_sentences(claim, text, max_sentences=3):
             for word in sentence_words
         }
 
-        matched_words = []
+        matched_groups = 0
 
-        for word in claim_words:
-            if word in sentence_stems:
-                matched_words.append(word)
+        for group in claim_groups:
+            if any(
+                word in sentence_stems
+                for word in group
+            ):
+                matched_groups += 1
 
-        unique_matches = list(dict.fromkeys(matched_words))
-
-        coverage = len(unique_matches) / max(len(claim_words), 1)
+        coverage = matched_groups / max(len(claim_groups), 1)
 
         has_contradiction = any(
             word in sentence_lower
             for word in CONTRADICTION_WORDS
         )
 
-        if has_contradiction and coverage >= 0.25:
+        if has_contradiction and matched_groups >= 2:
             status = "противоречит"
-        elif coverage >= 0.45:
+        elif matched_groups >= 3 and coverage >= 0.5:
             status = "подтверждает"
-        elif coverage >= 0.25:
+        elif matched_groups >= 2 and coverage >= 0.35:
             status = "косвенно подтверждает"
-        elif coverage >= 0.1:
+        elif matched_groups >= 2:
             status = "связан с темой утверждения"
         else:
             continue
@@ -615,20 +607,24 @@ def find_best_sentences(claim, text, max_sentences=3):
         matches.append({
             "sentence": sentence_clean,
             "status": status,
-            "coverage": coverage
+            "coverage": coverage,
+            "matched_groups": matched_groups
         })
 
     matches.sort(
-        key=lambda item: item["coverage"],
+        key=lambda item: (
+            item["matched_groups"],
+            item["coverage"]
+        ),
         reverse=True
     )
 
     return matches[:max_sentences]
 
 def estimate_support(claim, sources):
-    claim_words = get_claim_words(claim)
+    claim_groups = get_claim_word_groups(claim)
 
-    if not claim_words:
+    if not claim_groups:
         return 0.0, []
 
     evidence = []
@@ -648,11 +644,12 @@ def estimate_support(claim, sources):
         )
 
         if sentence_matches:
-            best_coverage = sentence_matches[0]["coverage"]
+            best_match = sentence_matches[0]
+
             trust = get_domain_trust(source.get("url", ""))
 
             final_score = (
-                best_coverage * 0.7 +
+                best_match["coverage"] * 0.7 +
                 trust * 0.3
             )
 
@@ -661,7 +658,8 @@ def estimate_support(claim, sources):
                 "url": source.get("url", ""),
                 "source": source.get("source", ""),
                 "quotes": sentence_matches,
-                "coverage": best_coverage,
+                "coverage": best_match["coverage"],
+                "matched_groups": best_match["matched_groups"],
                 "trust": trust,
                 "score": final_score
             })
@@ -675,7 +673,7 @@ def estimate_support(claim, sources):
                     support_score -= 1.0
 
     support_score = min(
-        max(support_score / max(len(claim_words), 1), 0.0),
+        max(support_score / max(len(claim_groups), 1), 0.0),
         1.0
     )
 
@@ -719,7 +717,6 @@ class FactChecker:
                 "source": result["source"]
             })
 
-        # Открываем до 5 наиболее перспективных страниц
         pages_to_open = []
 
         for source in all_sources:
@@ -788,7 +785,7 @@ class FactChecker:
 
         relevant_sources = []
 
-        claim_words = get_claim_words(text)
+        claim_groups = get_claim_word_groups(text)
 
         for source in all_sources:
             source_text = (
@@ -807,24 +804,29 @@ class FactChecker:
                 for word in source_words
             }
 
-            matched_words = []
+            matched_groups = 0
 
-            for word in claim_words:
-                if word in source_stems:
-                    matched_words.append(word)
+            for group in claim_groups:
+                if any(
+                    word in source_stems
+                    for word in group
+                ):
+                    matched_groups += 1
 
-            unique_matches = list(dict.fromkeys(matched_words))
+            coverage = matched_groups / max(len(claim_groups), 1)
 
-            coverage = len(unique_matches) / max(len(claim_words), 1)
-
-            if len(unique_matches) >= 2 or coverage >= 0.4:
+            if matched_groups >= 2 and coverage >= 0.35:
                 relevant_sources.append({
                     "source": source,
-                    "coverage": coverage
+                    "coverage": coverage,
+                    "matched_groups": matched_groups
                 })
 
         relevant_sources.sort(
-            key=lambda item: item["coverage"],
+            key=lambda item: (
+                item["matched_groups"],
+                item["coverage"]
+            ),
             reverse=True
         )
 
