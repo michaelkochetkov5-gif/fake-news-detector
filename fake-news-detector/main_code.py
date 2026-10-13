@@ -90,42 +90,56 @@ SYNONYMS = {
     ]
 }
 
-TRUSTED_DOMAINS = {
-    "wikipedia.org": 1.0,
-    "nasa.gov": 1.0,
-    "science.nasa.gov": 1.0,
-    "who.int": 1.0,
-    "un.org": 0.9,
-    "gov.ru": 0.9,
-    "edu.ru": 0.9,
-    "edu": 0.8,
+    # Медицина и здоровье
+    "cdc.gov": 1.0,
+    "nih.gov": 1.0,
+    "nimh.nih.gov": 1.0,
 
-    "ocw.mit.edu": 1.0,
-    "mit.edu": 0.95,
-    "khanacademy.org": 0.9,
-    "plato.stanford.edu": 1.0,
-    "stanford.edu": 0.95,
-    "ourworldindata.org": 0.95,
-    "scholar.google.com": 0.9,
+    # Экономика и финансы
+    "imf.org": 0.95,
+    "worldbank.org": 0.95,
+    "bis.org": 0.9,
 
-    "psychologytoday.com": 0.7,
-    "deeplearning.ai": 0.85,
-    "medlineplus.gov": 1.0,
-    "worldhistory.org": 0.85,
-    "core-econ.org": 0.9,
-    "greatergood.berkeley.edu": 0.9,
-    "iep.utm.edu": 0.9,
-    "freecodecamp.org": 0.8,
-    "startupschool.org": 0.75,
-    "firstdraftnews.org": 0.85,
+    # Климат, экология и энергетика
+    "ipcc.ch": 1.0,
+    "unep.org": 0.95,
+    "iea.org": 0.95,
+    "eia.gov": 0.9,
 
-    "ria.ru": 0.7,
-    "tass.ru": 0.7,
-    "interfax.ru": 0.7,
-    "bbc.com": 0.8,
-    "reuters.com": 0.9,
-    "apnews.com": 0.9
-}
+    # Космос и наука
+    "esa.int": 0.95,
+    "nature.com": 0.95,
+
+    # ИИ и кибербезопасность
+    "ai.gov": 0.9,
+    "oecd.ai": 0.9,
+    "cisa.gov": 0.95,
+    "ncsc.gov.uk": 0.9,
+
+    # Права человека и миграция
+    "unhcr.org": 0.95,
+    "iom.int": 0.9,
+    "ohchr.org": 0.95,
+    "amnesty.org": 0.8,
+
+    # История и энциклопедии
+    "britannica.com": 0.9,
+    "history.com": 0.75,
+
+    # Спорт
+    "olympics.com": 0.9,
+    "fifa.com": 0.8,
+
+    # Питание
+    "nutrition.org": 0.9,
+    "hsph.harvard.edu": 0.95,
+
+    # Погода
+    "noaa.gov": 1.0,
+
+    # Проверка фактов
+    "snopes.com": 0.85,
+    "factcheck.org": 0.9
 
 CONTRADICTION_WORDS = [
     "не является", "не имеет", "не соответствует",
