@@ -745,10 +745,13 @@ def find_best_sentences(claim, text, max_sentences=3):
             sentence_clean
         )
 
-        nli_status, nli_score = check_sentence_with_nli(
-            claim,
-            sentence_clean
-        )
+        nli_status, nli_score = None, 0.0
+
+        if matched_groups >= 3:
+            nli_status, nli_score = check_sentence_with_nli(
+                claim,
+                sentence_clean
+            )
 
         has_contradiction = any(
             word in sentence_lower
@@ -757,20 +760,22 @@ def find_best_sentences(claim, text, max_sentences=3):
 
         if numeric_check == "противоречит":
             status = "противоречит"
-        elif nli_status == "противоречит" and nli_score >= 0.6:
+        elif nli_status == "противоречит" and nli_score >= 0.75:
             status = "противоречит"
         elif numeric_check == "подтверждает":
             status = "подтверждает"
-        elif nli_status == "подтверждает" and nli_score >= 0.6:
+        elif nli_status == "подтверждает" and nli_score >= 0.7:
             status = "подтверждает"
         elif has_contradiction:
             status = "противоречит"
-        elif matched_groups >= 3 and coverage >= 0.5:
+        elif matched_groups >= 4 and coverage >= 0.6:
             status = "подтверждает"
-        elif matched_groups >= 2 and coverage >= 0.35:
+        elif matched_groups >= 3 and coverage >= 0.45:
             status = "косвенно подтверждает"
-        else:
+        elif matched_groups >= 2 and coverage >= 0.35:
             status = "связан с темой утверждения"
+        else:
+            continue
 
         matches.append({
             "sentence": sentence_clean,
@@ -839,7 +844,7 @@ def estimate_support(claim, sources):
                 if match["status"] == "подтверждает":
                     support_score += 1.0
                 elif match["status"] == "косвенно подтверждает":
-                    support_score += 0.6
+                    support_score += 0.5
                 elif match["status"] == "противоречит":
                     support_score -= 1.0
 
@@ -923,14 +928,16 @@ class FactChecker:
             for quote in quotes[:2]:
                 quote_texts.append(
                     f"«{quote['sentence']}» "
-                    f"— источник {quote['status']} утверждение."
+                    f"— источник {quote['status']} утверждению."
                 )
 
             has_confirmation = any(
-                quote["status"] in [
-                    "подтверждает",
-                    "косвенно подтверждает"
-                ]
+                quote["status"] == "подтверждает"
+                for quote in quotes
+            )
+
+            has_partial_confirmation = any(
+                quote["status"] == "косвенно подтверждает"
                 for quote in quotes
             )
 
@@ -941,7 +948,7 @@ class FactChecker:
 
             if has_contradiction and not has_confirmation:
                 result = False
-            elif has_confirmation:
+            elif has_confirmation or has_partial_confirmation:
                 result = True
             else:
                 result = None
@@ -1037,10 +1044,15 @@ class FactChecker:
         confirming_sources = [
             item for item in evidence
             if any(
-                quote["status"] in [
-                    "подтверждает",
-                    "косвенно подтверждает"
-                ]
+                quote["status"] == "подтверждает"
+                for quote in item["quotes"]
+            )
+        ]
+
+        partially_confirming_sources = [
+            item for item in evidence
+            if any(
+                quote["status"] == "косвенно подтверждает"
                 for quote in item["quotes"]
             )
         ]
@@ -1061,6 +1073,11 @@ class FactChecker:
             )
         ]
 
+        strong_contradictions = [
+            item for item in contradicting_sources
+            if item.get("trust", 0.5) >= 0.8
+        ]
+
         if numeric_contradictions:
             verdict = "ФЕЙК"
             confidence = min(
@@ -1068,20 +1085,38 @@ class FactChecker:
                 0.93
             )
             reason = (
-                "Найден источник с той же числовой информацией, "
-                "но противоположным направлением: например, в "
-                "утверждении указано снижение, а в источнике — рост."
+                "Найден релевантный источник с той же числовой "
+                "информацией, но противоположным направлением: "
+                "например, в утверждении указано снижение, а в "
+                "источнике — рост."
             )
 
-        elif contradicting_sources and not confirming_sources:
+        elif len(strong_contradictions) >= 2:
             verdict = "ФЕЙК"
             confidence = min(
-                0.6 + len(contradicting_sources) * 0.1,
-                0.88
+                0.72 + len(strong_contradictions) * 0.05,
+                0.9
             )
             reason = (
-                "Найдены релевантные источники, которые противоречат "
-                "утверждению."
+                "Найдено несколько релевантных источников, которые "
+                "противоречат утверждению."
+            )
+
+        elif strong_contradictions:
+            verdict = "НЕИЗВЕСТНО"
+            confidence = 0.55
+            reason = (
+                "Найден один релевантный источник с признаками "
+                "противоречия, но его недостаточно для надёжного "
+                "вывода о фейке."
+            )
+
+        elif contradicting_sources:
+            verdict = "НЕИЗВЕСТНО"
+            confidence = 0.5
+            reason = (
+                "Найдены возможные противоречия, но источники "
+                "недостаточно релевантны или недостаточно надёжны."
             )
 
         elif confirming_sources:
@@ -1089,39 +1124,14 @@ class FactChecker:
 
             if len(confirming_sources) >= 2:
                 confidence = max(
-                    0.70,
+                    0.72,
                     min(
-                        0.70 + support * 0.20,
+                        0.72 + support * 0.2,
                         0.92
                     )
                 )
             else:
-                confidence = 0.65
+                confidence = 0.68
 
             reason = (
-                "Найдены релевантные источники, которые подтверждают "
-                "или косвенно подтверждают утверждение."
-            )
-
-        elif relevant_sources:
-            verdict = "НЕИЗВЕСТНО"
-            confidence = 0.5
-            reason = (
-                "Найдены источники по теме, но в них нет достаточно "
-                "точного подтверждения или опровержения утверждения."
-            )
-
-        else:
-            verdict = "НЕИЗВЕСТНО"
-            confidence = 0.5
-            reason = (
-                "Поиск не нашёл достаточного количества релевантных "
-                "источников для проверки утверждения."
-            )
-
-        return {
-            "verdict": verdict,
-            "confidence": confidence,
-            "reason": reason,
-            "details": details
-        }
+                "Найден релевантный источник, который
