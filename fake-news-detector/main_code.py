@@ -8,6 +8,12 @@ import time
 from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
 
+try:
+    from transformers import pipeline
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
+
 CACHE_FILE = "cache.json"
 
 if os.path.exists(CACHE_FILE):
@@ -49,7 +55,7 @@ STOP_WORDS = {
     "да", "нет", "как", "что", "чем", "при", "для", "от", "до",
     "из", "по", "за", "на", "в", "во", "со", "с", "у", "о", "об",
     "обо", "над", "под", "про", "через", "между", "имеет", "является",
-    "года", "году", "года", "прошёл", "прошел", "прошла", "прошли",
+    "года", "году", "прошёл", "прошел", "прошла", "прошли",
     "состоялся", "состоялась", "состоялось"
 }
 
@@ -83,17 +89,56 @@ SYNONYMS = {
 }
 
 TRUSTED_DOMAINS = {
-    # Профессиональная проверка фактов
+    "wikipedia.org": 1.0,
+    "nasa.gov": 1.0,
+    "science.nasa.gov": 1.0,
+    "who.int": 1.0,
+    "un.org": 0.9,
+    "gov.ru": 0.9,
+    "edu.ru": 0.9,
+    "edu": 0.8,
+
+    "ocw.mit.edu": 1.0,
+    "mit.edu": 0.95,
+    "khanacademy.org": 0.9,
+    "plato.stanford.edu": 1.0,
+    "stanford.edu": 0.95,
+    "ourworldindata.org": 0.95,
+    "scholar.google.com": 0.9,
+
+    "psychologytoday.com": 0.7,
+    "deeplearning.ai": 0.85,
+    "medlineplus.gov": 1.0,
+    "worldhistory.org": 0.85,
+    "core-econ.org": 0.9,
+    "greatergood.berkeley.edu": 0.9,
+    "iep.utm.edu": 0.9,
+    "freecodecamp.org": 0.8,
+    "startupschool.org": 0.75,
+    "firstdraftnews.org": 0.85,
+
+    "cdc.gov": 1.0,
+    "nih.gov": 1.0,
+    "nimh.nih.gov": 1.0,
+    "imf.org": 0.95,
+    "worldbank.org": 0.95,
+    "ipcc.ch": 1.0,
+    "unep.org": 0.95,
+    "iea.org": 0.95,
+    "esa.int": 0.95,
+    "nature.com": 0.95,
+    "cisa.gov": 0.95,
+    "unhcr.org": 0.95,
+    "ohchr.org": 0.95,
+    "noaa.gov": 1.0,
+    "snopes.com": 0.85,
+    "factcheck.org": 0.9,
+
     "politifact.com": 0.95,
     "factcheck.afp.com": 0.95,
     "fullfact.org": 0.9,
     "aap.com.au": 0.85,
-    "snopes.com": 0.85,
-    "factcheck.org": 0.9,
 
-    # Международные организации
-    "who.int": 1.0,
-    "un.org": 0.9,
     "unesco.org": 0.95,
     "wto.org": 0.9,
     "ilo.org": 0.9,
@@ -102,87 +147,35 @@ TRUSTED_DOMAINS = {
     "oecd.org": 0.95,
     "nato.int": 0.85,
     "europa.eu": 0.9,
-    "imf.org": 0.95,
-    "worldbank.org": 0.95,
-    "unhcr.org": 0.95,
-    "iom.int": 0.9,
-    "ohchr.org": 0.95,
 
-    # Медицина и наука
-    "cdc.gov": 1.0,
-    "nih.gov": 1.0,
-    "nimh.nih.gov": 1.0,
     "hhs.gov": 0.95,
     "fda.gov": 1.0,
     "ema.europa.eu": 0.95,
-    "medlineplus.gov": 1.0,
-    "nature.com": 0.95,
     "science.org": 0.95,
     "sciencedirect.com": 0.9,
     "springer.com": 0.9,
     "bmj.com": 0.95,
     "thelancet.com": 0.95,
 
-    # Космос, климат и энергетика
-    "nasa.gov": 1.0,
-    "science.nasa.gov": 1.0,
-    "esa.int": 0.95,
-    "noaa.gov": 1.0,
-    "ipcc.ch": 1.0,
-    "unep.org": 0.95,
-    "iea.org": 0.95,
-    "eia.gov": 0.9,
     "copernicus.eu": 0.95,
     "carbonbrief.org": 0.8,
-
-    # Образование и энциклопедии
-    "wikipedia.org": 1.0,
     "britannica.com": 0.9,
     "oxfordreference.com": 0.95,
     "cambridge.org": 0.95,
-    "ocw.mit.edu": 1.0,
-    "mit.edu": 0.95,
-    "khanacademy.org": 0.9,
-    "plato.stanford.edu": 1.0,
-    "stanford.edu": 0.95,
-    "ourworldindata.org": 0.95,
-    "scholar.google.com": 0.9,
-    "core-econ.org": 0.9,
-    "iep.utm.edu": 0.9,
-    "worldhistory.org": 0.85,
-    "greatergood.berkeley.edu": 0.9,
-
-    # Технологии, ИИ и безопасность
     "ai.gov": 0.9,
     "oecd.ai": 0.9,
-    "cisa.gov": 0.95,
-    "ncsc.gov.uk": 0.9,
     "nist.gov": 0.95,
     "openai.com": 0.8,
     "huggingface.co": 0.8,
-    "deeplearning.ai": 0.85,
-    "freecodecamp.org": 0.8,
-    "startupschool.org": 0.75,
+    "eur-lex.europa.eu": 0.95,
+    "justice.gov": 0.9,
 
-    # Новости
     "ria.ru": 0.7,
     "tass.ru": 0.7,
     "interfax.ru": 0.7,
     "bbc.com": 0.8,
     "reuters.com": 0.9,
-    "apnews.com": 0.9,
-
-    # Право
-    "gov.ru": 0.9,
-    "edu.ru": 0.9,
-    "edu": 0.8,
-    "eur-lex.europa.eu": 0.95,
-    "justice.gov": 0.9,
-
-    # Психология и другие темы
-    "psychologytoday.com": 0.7,
-    "greatergood.berkeley.edu": 0.9,
-    "firstdraftnews.org": 0.85
+    "apnews.com": 0.9
 }
 
 CONTRADICTION_WORDS = [
@@ -190,6 +183,35 @@ CONTRADICTION_WORDS = [
     "опровергает", "опровергнуто", "ложно", "ложная",
     "фейк", "миф", "неверно", "неправда", "дезинформация"
 ]
+
+GROWTH_WORDS = [
+    "вырастет", "вырастут", "вырасти", "рост", "роста",
+    "увеличится", "увеличатся", "увеличение", "увеличения",
+    "повысится", "повысятся", "повышение", "повышения",
+    "поднимется", "поднимутся", "прирост", "прироста"
+]
+
+DECLINE_WORDS = [
+    "сократится", "сократятся", "сокращение", "сокращения",
+    "снизится", "снизятся", "снижение", "снижения",
+    "уменьшится", "уменьшатся", "уменьшение", "уменьшения",
+    "упадёт", "упадут", "падение", "падения", "спад", "спада"
+]
+
+@st.cache_resource
+def load_nli_model():
+    if not TRANSFORMERS_AVAILABLE:
+        return None
+
+    try:
+        return pipeline(
+            "zero-shot-classification",
+            model="joeddav/xlm-roberta-large-xnli"
+        )
+    except Exception:
+        return None
+
+nli_model = load_nli_model()
 
 def clean_text(text):
     if not text:
@@ -601,6 +623,84 @@ def get_relevant_articles(claim, max_articles=5):
 
     return articles
 
+def normalize_number(text):
+    text = text.lower().replace(",", ".")
+
+    return re.findall(r"\d+(?:\.\d+)?", text)
+
+def get_direction(text):
+    text_lower = text.lower()
+
+    has_growth = any(
+        word in text_lower
+        for word in GROWTH_WORDS
+    )
+
+    has_decline = any(
+        word in text_lower
+        for word in DECLINE_WORDS
+    )
+
+    if has_growth and not has_decline:
+        return "рост"
+
+    if has_decline and not has_growth:
+        return "снижение"
+
+    return None
+
+def check_numeric_relation(claim, sentence):
+    claim_numbers = normalize_number(claim)
+    sentence_numbers = normalize_number(sentence)
+
+    if not claim_numbers or not sentence_numbers:
+        return None
+
+    common_numbers = set(claim_numbers) & set(sentence_numbers)
+
+    if not common_numbers:
+        return None
+
+    claim_direction = get_direction(claim)
+    sentence_direction = get_direction(sentence)
+
+    if not claim_direction or not sentence_direction:
+        return None
+
+    if claim_direction != sentence_direction:
+        return "противоречит"
+
+    return "подтверждает"
+
+def check_sentence_with_nli(claim, sentence):
+    if nli_model is None:
+        return None, 0.0
+
+    try:
+        result = nli_model(
+            sentence,
+            candidate_labels=[
+                "утверждение подтверждается",
+                "утверждение противоречит источнику",
+                "источник не относится к утверждению"
+            ],
+            hypothesis_template="Этот текст означает, что {}."
+        )
+
+        label = result["labels"][0]
+        score = result["scores"][0]
+
+        if label == "утверждение подтверждается":
+            return "подтверждает", score
+
+        if label == "утверждение противоречит источнику":
+            return "противоречит", score
+
+        return "нейтрально", score
+
+    except Exception:
+        return None, 0.0
+
 def find_best_sentences(claim, text, max_sentences=3):
     sentences = re.split(r"(?<=[.!?])\s+", text)
 
@@ -637,27 +737,49 @@ def find_best_sentences(claim, text, max_sentences=3):
 
         coverage = matched_groups / max(len(claim_groups), 1)
 
+        if matched_groups < 2:
+            continue
+
+        numeric_check = check_numeric_relation(
+            claim,
+            sentence_clean
+        )
+
+        nli_status, nli_score = check_sentence_with_nli(
+            claim,
+            sentence_clean
+        )
+
         has_contradiction = any(
             word in sentence_lower
             for word in CONTRADICTION_WORDS
         )
 
-        if has_contradiction and matched_groups >= 2:
+        if numeric_check == "противоречит":
+            status = "противоречит"
+        elif nli_status == "противоречит" and nli_score >= 0.6:
+            status = "противоречит"
+        elif numeric_check == "подтверждает":
+            status = "подтверждает"
+        elif nli_status == "подтверждает" and nli_score >= 0.6:
+            status = "подтверждает"
+        elif has_contradiction:
             status = "противоречит"
         elif matched_groups >= 3 and coverage >= 0.5:
             status = "подтверждает"
         elif matched_groups >= 2 and coverage >= 0.35:
             status = "косвенно подтверждает"
-        elif matched_groups >= 2:
-            status = "связан с темой утверждения"
         else:
-            continue
+            status = "связан с темой утверждения"
 
         matches.append({
             "sentence": sentence_clean,
             "status": status,
             "coverage": coverage,
-            "matched_groups": matched_groups
+            "matched_groups": matched_groups,
+            "numeric_check": numeric_check,
+            "nli_status": nli_status,
+            "nli_score": nli_score
         })
 
     matches.sort(
@@ -931,7 +1053,27 @@ class FactChecker:
             )
         ]
 
-        if contradicting_sources and not confirming_sources:
+        numeric_contradictions = [
+            item for item in evidence
+            if any(
+                quote.get("numeric_check") == "противоречит"
+                for quote in item["quotes"]
+            )
+        ]
+
+        if numeric_contradictions:
+            verdict = "ФЕЙК"
+            confidence = min(
+                0.78 + len(numeric_contradictions) * 0.05,
+                0.93
+            )
+            reason = (
+                "Найден источник с той же числовой информацией, "
+                "но противоположным направлением: например, в "
+                "утверждении указано снижение, а в источнике — рост."
+            )
+
+        elif contradicting_sources and not confirming_sources:
             verdict = "ФЕЙК"
             confidence = min(
                 0.6 + len(contradicting_sources) * 0.1,
