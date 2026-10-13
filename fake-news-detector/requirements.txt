@@ -8,3 +8,5 @@ duckduckgo-search
 feedparser
 requests
 wikipedia
+transformers
+torch
