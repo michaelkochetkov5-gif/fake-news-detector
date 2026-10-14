@@ -3,15 +3,12 @@ import joblib
 import re
 import csv
 import os
-from datetime import datetime
 from pymorphy3 import MorphAnalyzer
-from main_code import FactChecker
 from scipy.special import expit
+from main_code import FactChecker
 
-# ===== НАСТРОЙКИ =====
 CSV_FILE = "test_results.csv"
 
-# Тестовые данные: true / fake чередуются
 TEST_CASES = [
     {
         "text": "Земля имеет форму шара.",
@@ -63,33 +60,42 @@ TEST_CASES = [
     }
 ]
 
-# ===== ML-МОДЕЛЬ =====
+
+@st.cache_resource
+def load_fact_checker():
+    return FactChecker()
+
+
 @st.cache_resource
 def load_style_model():
     try:
         model = joblib.load(
-            "fake-news-detector/russian_fake_news_model_lemma_best.pkl"
+            "russian_fake_news_model_lemma_best.pkl"
         )
         vectorizer = joblib.load(
-            "fake-news-detector/russian_fake_news_vectorizer_lemma.pkl"
+            "russian_fake_news_vectorizer_lemma.pkl"
         )
+
         return model, vectorizer
+
     except (FileNotFoundError, OSError):
         return None, None
 
+
+fact_checker = load_fact_checker()
 model, vectorizer = load_style_model()
 morph = MorphAnalyzer()
+
 
 def clean_text(text):
     text = re.sub(r"<[^>]+>", "", text)
     text = re.sub(r"http\S+|www\S+", "", text)
     text = re.sub(r"\S+@\S+", "", text)
-    text = re.sub(r"@\w+", "", text)
-    text = re.sub(r"#", "", text)
-    text = re.sub(r"[^\w\s.,!?;:()\-\"]", "", text)
-    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"[^\w\s]", " ", text)
+    text = re.sub(r"\s+", " ", text)
 
-    return text.lower()
+    return text.lower().strip()
+
 
 def lemmatize_text(text):
     words = text.split()
@@ -105,6 +111,7 @@ def lemmatize_text(text):
                 lemmas.append(word)
 
     return " ".join(lemmas)
+
 
 def analyze_style(text):
     if model is None or vectorizer is None:
@@ -124,24 +131,20 @@ def analyze_style(text):
         decision = model.decision_function(vectorized)[0]
         confidence = expit(decision) * 100
 
+    # ВАЖНО:
+    # Если после запуска теста метки окажутся перевёрнутыми,
+    # поменяй 0 и 1 местами.
     if prediction == 0:
-        return "ФЕЙК", confidence
+        return "ПРАВДА", confidence
 
-    return "ПРАВДА", confidence
+    return "ФЕЙК", confidence
 
-# ===== ФАКТЧЕКЕР =====
-@st.cache_resource
-def load_fact_checker():
-    return FactChecker()
 
-fact_checker = load_fact_checker()
-
-# ===== ЗАПУСК ТЕСТА =====
 st.title("🧪 Тест фактчекера и ML-модели")
 
 st.write(
     "Тест подаёт проверенные и ложные утверждения по очереди, "
-    "затем сравнивает ответ системы с правильным."
+    "разбивает их на смысловые части и проверяет каждую отдельно."
 )
 
 if st.button("▶️ Запустить тест"):
@@ -162,16 +165,14 @@ if st.button("▶️ Запустить тест"):
             f"Проверяю {i + 1} из {len(TEST_CASES)}: {text}"
         )
 
-        # Фактчекер
         fact_result = fact_checker.verify(text)
-        fact_verdict = fact_result["verdict"]
 
+        fact_verdict = fact_result["verdict"]
         fact_is_correct = fact_verdict == expected
 
         if fact_is_correct:
             fact_correct += 1
 
-        # ML-модель
         style_verdict, style_confidence = analyze_style(text)
 
         if style_verdict is not None:
@@ -181,10 +182,10 @@ if st.button("▶️ Запустить тест"):
 
             if style_is_correct:
                 style_correct += 1
+
         else:
             style_is_correct = None
 
-        # Источники
         sources = []
 
         for detail in fact_result.get("details", []):
@@ -196,7 +197,9 @@ if st.button("▶️ Запустить тест"):
             "Текст": text,
             "Ожидалось": expected,
             "Фактчекер": fact_verdict,
-            "Фактчекер верно": "Да" if fact_is_correct else "Нет",
+            "Фактчекер верно": (
+                "Да" if fact_is_correct else "Нет"
+            ),
             "Уверенность фактчекера": round(
                 fact_result["confidence"] * 100, 1
             ),
@@ -218,7 +221,6 @@ if st.button("▶️ Запустить тест"):
 
     status.success("Тест завершён")
 
-    # ===== РЕЗУЛЬТАТЫ =====
     total = len(TEST_CASES)
 
     fact_accuracy = fact_correct / total * 100
@@ -249,16 +251,6 @@ if st.button("▶️ Запустить тест"):
             "Проверено примеров",
             total
         )
-
-    st.write(
-        f"Фактчекер правильно ответил на **{fact_correct} "
-        f"из {total}** утверждений."
-    )
-
-    st.write(
-        f"ML-модель проверила **{style_checked}** текстов и правильно "
-        f"ответила на **{style_correct}**."
-    )
 
     st.subheader("📋 Подробные результаты")
 
@@ -298,7 +290,6 @@ if st.button("▶️ Запустить тест"):
 
         st.divider()
 
-    # ===== СОХРАНЕНИЕ CSV =====
     file_exists = os.path.exists(CSV_FILE)
 
     with open(
@@ -320,11 +311,4 @@ if st.button("▶️ Запустить тест"):
 
     st.success(
         f"Результаты сохранены в файл {CSV_FILE}"
-    )
-
-    st.download_button(
-        label="📥 Скачать отчёт CSV",
-        data=open(CSV_FILE, "r", encoding="utf-8-sig").read(),
-        file_name=CSV_FILE,
-        mime="text/csv"
     )
