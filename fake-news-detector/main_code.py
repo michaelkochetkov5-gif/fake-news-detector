@@ -6,7 +6,11 @@ import json
 import os
 import time
 from bs4 import BeautifulSoup
-from duckduckgo_search import DDGS
+
+try:
+    from ddgs import DDGS
+except ImportError:
+    from duckduckgo_search import DDGS
 
 try:
     from transformers import pipeline
@@ -28,6 +32,7 @@ else:
 search_cache = cache.get("search_cache", {})
 news_cache = cache.get("news_cache", {})
 
+
 def save_cache():
     try:
         with open(CACHE_FILE, "w", encoding="utf-8") as file:
@@ -43,8 +48,14 @@ def save_cache():
     except Exception:
         pass
 
+
 def get_cache_key(text):
-    return re.sub(r"[^a-zа-яё0-9]+", "_", text.lower()).strip("_")
+    return re.sub(
+        r"[^a-zа-яё0-9]+",
+        "_",
+        text.lower()
+    ).strip("_")
+
 
 STOP_WORDS = {
     "это", "этот", "эта", "эти", "того", "такой", "такая", "такие",
@@ -97,85 +108,22 @@ TRUSTED_DOMAINS = {
     "gov.ru": 0.9,
     "edu.ru": 0.9,
     "edu": 0.8,
-
-    "ocw.mit.edu": 1.0,
     "mit.edu": 0.95,
     "khanacademy.org": 0.9,
-    "plato.stanford.edu": 1.0,
     "stanford.edu": 0.95,
     "ourworldindata.org": 0.95,
-    "scholar.google.com": 0.9,
-
-    "psychologytoday.com": 0.7,
-    "deeplearning.ai": 0.85,
     "medlineplus.gov": 1.0,
-    "worldhistory.org": 0.85,
-    "core-econ.org": 0.9,
-    "greatergood.berkeley.edu": 0.9,
-    "iep.utm.edu": 0.9,
-    "freecodecamp.org": 0.8,
-    "startupschool.org": 0.75,
-    "firstdraftnews.org": 0.85,
-
     "cdc.gov": 1.0,
     "nih.gov": 1.0,
-    "nimh.nih.gov": 1.0,
     "imf.org": 0.95,
     "worldbank.org": 0.95,
-    "ipcc.ch": 1.0,
-    "unep.org": 0.95,
-    "iea.org": 0.95,
-    "esa.int": 0.95,
     "nature.com": 0.95,
-    "cisa.gov": 0.95,
-    "unhcr.org": 0.95,
-    "ohchr.org": 0.95,
-    "noaa.gov": 1.0,
-    "snopes.com": 0.85,
-    "factcheck.org": 0.9,
-
-    "politifact.com": 0.95,
-    "factcheck.afp.com": 0.95,
-    "fullfact.org": 0.9,
-    "aap.com.au": 0.85,
-
-    "unesco.org": 0.95,
-    "wto.org": 0.9,
-    "ilo.org": 0.9,
-    "fao.org": 0.9,
-    "ifad.org": 0.9,
-    "oecd.org": 0.95,
-    "nato.int": 0.85,
-    "europa.eu": 0.9,
-
-    "hhs.gov": 0.95,
-    "fda.gov": 1.0,
-    "ema.europa.eu": 0.95,
-    "science.org": 0.95,
-    "sciencedirect.com": 0.9,
-    "springer.com": 0.9,
-    "bmj.com": 0.95,
-    "thelancet.com": 0.95,
-
-    "copernicus.eu": 0.95,
-    "carbonbrief.org": 0.8,
-    "britannica.com": 0.9,
-    "oxfordreference.com": 0.95,
-    "cambridge.org": 0.95,
-    "ai.gov": 0.9,
-    "oecd.ai": 0.9,
-    "nist.gov": 0.95,
-    "openai.com": 0.8,
-    "huggingface.co": 0.8,
-    "eur-lex.europa.eu": 0.95,
-    "justice.gov": 0.9,
-
-    "ria.ru": 0.7,
-    "tass.ru": 0.7,
-    "interfax.ru": 0.7,
-    "bbc.com": 0.8,
     "reuters.com": 0.9,
-    "apnews.com": 0.9
+    "apnews.com": 0.9,
+    "bbc.com": 0.8,
+    "interfax.ru": 0.7,
+    "tass.ru": 0.7,
+    "ria.ru": 0.7
 }
 
 CONTRADICTION_WORDS = [
@@ -198,6 +146,7 @@ DECLINE_WORDS = [
     "упадёт", "упадут", "падение", "падения", "спад", "спада"
 ]
 
+
 @st.cache_resource
 def load_nli_model():
     if not TRANSFORMERS_AVAILABLE:
@@ -211,7 +160,9 @@ def load_nli_model():
     except Exception:
         return None
 
+
 nli_model = load_nli_model()
+
 
 def clean_text(text):
     if not text:
@@ -222,6 +173,7 @@ def clean_text(text):
 
     return text.strip()
 
+
 def normalize_word(word):
     word = word.lower().strip()
 
@@ -229,6 +181,7 @@ def normalize_word(word):
         return word
 
     return word[:5]
+
 
 def get_base_words(text):
     words = re.findall(r"[а-яёa-z]{4,}", text.lower())
@@ -239,6 +192,7 @@ def get_base_words(text):
     ]
 
     return list(dict.fromkeys(words))
+
 
 def get_claim_word_groups(text):
     words = get_base_words(text)
@@ -255,6 +209,7 @@ def get_claim_word_groups(text):
         groups.append(list(dict.fromkeys(group)))
 
     return groups
+
 
 def get_claim_words(text):
     words = get_base_words(text)
@@ -274,6 +229,75 @@ def get_claim_words(text):
 
     return list(dict.fromkeys(normalized))
 
+
+def split_into_claims(text):
+    """
+    Разбивает текст на короткие смысловые утверждения.
+    """
+    text = clean_text(text)
+
+    sentences = re.split(r"(?<=[.!?;])\s+", text)
+
+    split_words = [
+        "а", "но", "однако", "хотя", "при этом",
+        "кроме того", "также", "поэтому",
+        "потому что", "так как",
+        "утверждается, что", "сообщается, что"
+    ]
+
+    claims = []
+
+    for sentence in sentences:
+        sentence = sentence.strip()
+
+        if not sentence:
+            continue
+
+        parts = [sentence]
+
+        for word in split_words:
+            new_parts = []
+
+            for part in parts:
+                pattern = rf",?\s+{re.escape(word)}\s+"
+                pieces = re.split(
+                    pattern,
+                    part,
+                    flags=re.IGNORECASE
+                )
+
+                for piece in pieces:
+                    piece = piece.strip()
+
+                    if piece:
+                        new_parts.append(piece)
+
+            parts = new_parts
+
+        for part in parts:
+            part = re.sub(
+                r"^(сообщается|заявляется|утверждается|по данным|по словам)\s+(что|о том, что)?\s*,?\s*",
+                "",
+                part,
+                flags=re.IGNORECASE
+            )
+
+            part = part.strip(" .,;:!?")
+
+            if len(part.split()) >= 3:
+                claims.append(part)
+
+    unique_claims = []
+
+    for claim in claims:
+        if claim.lower() not in [
+            item.lower() for item in unique_claims
+        ]:
+            unique_claims.append(claim)
+
+    return unique_claims
+
+
 def get_domain_trust(url):
     try:
         domain = url.lower()
@@ -290,6 +314,7 @@ def get_domain_trust(url):
 
     return 0.5
 
+
 def make_search_queries(claim):
     queries = [claim]
 
@@ -302,6 +327,7 @@ def make_search_queries(claim):
         queries.append(" ".join(words[:4]))
 
     return list(dict.fromkeys(queries))
+
 
 def get_page_text(url, max_length=12000):
     if not url:
@@ -329,25 +355,19 @@ def get_page_text(url, max_length=12000):
         )
 
         for tag in soup([
-            "script",
-            "style",
-            "nav",
-            "header",
-            "footer",
-            "aside",
-            "form",
-            "button"
+            "script", "style", "nav", "header",
+            "footer", "aside", "form", "button"
         ]):
             tag.decompose()
 
         text = soup.get_text(separator=" ")
-
         text = clean_text(text)
 
         return text[:max_length]
 
     except Exception:
         return ""
+
 
 def search_duckduckgo(claim, max_results=10):
     cache_key = "ddg_" + get_cache_key(claim)
@@ -379,8 +399,12 @@ def search_duckduckgo(claim, max_results=10):
 
                             results.append({
                                 "title": result.get("title", ""),
-                                "summary": clean_text(result.get("body", "")),
-                                "body": clean_text(result.get("body", "")),
+                                "summary": clean_text(
+                                    result.get("body", "")
+                                ),
+                                "body": clean_text(
+                                    result.get("body", "")
+                                ),
                                 "url": url,
                                 "source": "DuckDuckGo"
                             })
@@ -399,17 +423,26 @@ def search_duckduckgo(claim, max_results=10):
                 )
 
                 for result in news_results:
-                    url = result.get("href", "") or result.get("url", "")
+                    url = (
+                        result.get("href", "")
+                        or result.get("url", "")
+                    )
 
                     if url and url not in seen_urls:
                         seen_urls.add(url)
 
                         results.append({
                             "title": result.get("title", ""),
-                            "summary": clean_text(result.get("body", "")),
-                            "body": clean_text(result.get("body", "")),
+                            "summary": clean_text(
+                                result.get("body", "")
+                            ),
+                            "body": clean_text(
+                                result.get("body", "")
+                            ),
                             "url": url,
-                            "source": result.get("source", "DuckDuckGo News")
+                            "source": result.get(
+                                "source", "DuckDuckGo News"
+                            )
                         })
 
                 time.sleep(1)
@@ -424,6 +457,7 @@ def search_duckduckgo(claim, max_results=10):
     save_cache()
 
     return results[:max_results]
+
 
 def search_wikipedia_api(claim, max_results=6):
     cache_key = "wiki_" + get_cache_key(claim)
@@ -456,7 +490,6 @@ def search_wikipedia_api(claim, max_results=6):
             )
 
             data = response.json()
-
             pages = data.get("query", {}).get("search", [])
 
             for page in pages:
@@ -521,6 +554,7 @@ def search_wikipedia_api(claim, max_results=6):
 
     return unique_results[:max_results]
 
+
 RSS_FEEDS = [
     {
         "name": "РИА Новости",
@@ -543,6 +577,7 @@ RSS_FEEDS = [
         "url": "https://feeds.bbci.co.uk/russian/rss.xml"
     }
 ]
+
 
 def get_relevant_articles(claim, max_articles=5):
     cache_key = "news_" + get_cache_key(claim)
@@ -588,9 +623,11 @@ def get_relevant_articles(claim, max_articles=5):
                     ):
                         matched_groups += 1
 
-                coverage = matched_groups / max(len(claim_groups), 1)
+                coverage = matched_groups / max(
+                    len(claim_groups), 1
+                )
 
-                if matched_groups >= 2 and coverage >= 0.35:
+                if matched_groups >= 2 and coverage >= 0.30:
                     articles.append({
                         "title": title,
                         "summary": summary,
@@ -623,10 +660,12 @@ def get_relevant_articles(claim, max_articles=5):
 
     return articles
 
+
 def normalize_number(text):
     text = text.lower().replace(",", ".")
 
     return re.findall(r"\d+(?:\.\d+)?", text)
+
 
 def get_direction(text):
     text_lower = text.lower()
@@ -648,6 +687,7 @@ def get_direction(text):
         return "снижение"
 
     return None
+
 
 def check_numeric_relation(claim, sentence):
     claim_numbers = normalize_number(claim)
@@ -671,6 +711,7 @@ def check_numeric_relation(claim, sentence):
         return "противоречит"
 
     return "подтверждает"
+
 
 def check_sentence_with_nli(claim, sentence):
     if nli_model is None:
@@ -701,6 +742,7 @@ def check_sentence_with_nli(claim, sentence):
     except Exception:
         return None, 0.0
 
+
 def highlight_matched_words(sentence, claim_groups):
     sentence_words = re.findall(
         r"[а-яёa-z0-9.,%]+",
@@ -722,7 +764,9 @@ def highlight_matched_words(sentence, claim_groups):
 
             if stem in group_stems:
                 pattern = re.compile(
-                    r"(?<![\w])" + re.escape(word_clean) + r"(?![\w])",
+                    r"(?<![\w])"
+                    + re.escape(word_clean)
+                    + r"(?![\w])",
                     re.IGNORECASE
                 )
 
@@ -733,6 +777,7 @@ def highlight_matched_words(sentence, claim_groups):
                 )
 
     return highlighted
+
 
 def find_best_sentences(claim, text, max_sentences=3):
     sentences = re.split(r"(?<=[.!?])\s+", text)
@@ -772,9 +817,11 @@ def find_best_sentences(claim, text, max_sentences=3):
                 matched_groups += 1
                 matched_words.append(group[0])
 
-        coverage = matched_groups / max(len(claim_groups), 1)
+        coverage = matched_groups / max(
+            len(claim_groups), 1
+        )
 
-        if matched_groups < 3:
+        if matched_groups < 2:
             continue
 
         numeric_check = check_numeric_relation(
@@ -794,18 +841,25 @@ def find_best_sentences(claim, text, max_sentences=3):
 
         if numeric_check == "противоречит":
             status = "противоречит"
-        elif nli_status == "противоречит" and nli_score >= 0.75:
+
+        elif nli_status == "противоречит" and nli_score >= 0.70:
             status = "противоречит"
+
         elif numeric_check == "подтверждает":
             status = "подтверждает"
-        elif nli_status == "подтверждает" and nli_score >= 0.7:
+
+        elif nli_status == "подтверждает" and nli_score >= 0.65:
             status = "подтверждает"
+
         elif has_contradiction:
             status = "противоречит"
-        elif matched_groups >= 4 and coverage >= 0.6:
+
+        elif matched_groups >= 3 and coverage >= 0.5:
             status = "подтверждает"
-        elif matched_groups >= 3 and coverage >= 0.45:
+
+        elif matched_groups >= 2 and coverage >= 0.3:
             status = "косвенно подтверждает"
+
         else:
             status = "связан с темой утверждения"
 
@@ -836,6 +890,7 @@ def find_best_sentences(claim, text, max_sentences=3):
 
     return matches[:max_sentences]
 
+
 def estimate_support(claim, sources):
     claim_groups = get_claim_word_groups(claim)
 
@@ -861,7 +916,9 @@ def estimate_support(claim, sources):
         if sentence_matches:
             best_match = sentence_matches[0]
 
-            trust = get_domain_trust(source.get("url", ""))
+            trust = get_domain_trust(
+                source.get("url", "")
+            )
 
             final_score = (
                 best_match["coverage"] * 0.7 +
@@ -889,7 +946,10 @@ def estimate_support(claim, sources):
                     support_score -= 1.0
 
     support_score = min(
-        max(support_score / max(len(claim_groups), 1), 0.0),
+        max(
+            support_score / max(len(claim_groups), 1),
+            0.0
+        ),
         1.0
     )
 
@@ -899,6 +959,7 @@ def estimate_support(claim, sources):
     )
 
     return support_score, evidence
+
 
 class FactChecker:
     def check_fact(self, text):
@@ -912,6 +973,23 @@ class FactChecker:
         }
 
     def verify(self, text):
+        claims = split_into_claims(text)
+
+        if not claims:
+            claims = [clean_text(text)]
+
+        claims = claims[:3]
+
+        results = []
+
+        for claim in claims:
+            results.append(
+                self._verify_single_claim(claim)
+            )
+
+        return self._combine_results(results)
+
+    def _verify_single_claim(self, text):
         duckduckgo_results = search_duckduckgo(text)
         wikipedia_results = search_wikipedia_api(text)
         rss_results = get_relevant_articles(text)
@@ -956,7 +1034,10 @@ class FactChecker:
 
                         break
 
-        support, evidence = estimate_support(text, all_sources)
+        support, evidence = estimate_support(
+            text,
+            all_sources
+        )
 
         details = []
 
@@ -1036,9 +1117,11 @@ class FactChecker:
                 ):
                     matched_groups += 1
 
-            coverage = matched_groups / max(len(claim_groups), 1)
+            coverage = matched_groups / max(
+                len(claim_groups), 1
+            )
 
-            if matched_groups >= 2 and coverage >= 0.35:
+            if matched_groups >= 2 and coverage >= 0.30:
                 relevant_sources.append({
                     "source": source,
                     "coverage": coverage,
@@ -1087,7 +1170,10 @@ class FactChecker:
                         f"Источник связан с темой утверждения: "
                         f"«{highlighted_sentence}»"
                     ),
-                    "links": [source.get("url", "")] if source.get("url") else [],
+                    "links": (
+                        [source.get("url", "")]
+                        if source.get("url") else []
+                    ),
                     "result": None
                 })
 
@@ -1136,37 +1222,26 @@ class FactChecker:
             )
             reason = (
                 "Найден релевантный источник с той же числовой "
-                "информацией, но противоположным направлением: "
-                "например, в утверждении указано снижение, а в "
-                "источнике — рост."
+                "информацией, но противоположным направлением."
             )
 
-        elif len(strong_contradictions) >= 2:
+        elif strong_contradictions:
             verdict = "ФЕЙК"
             confidence = min(
                 0.72 + len(strong_contradictions) * 0.05,
                 0.9
             )
             reason = (
-                "Найдено несколько релевантных источников, которые "
-                "противоречат утверждению."
-            )
-
-        elif strong_contradictions:
-            verdict = "НЕИЗВЕСТНО"
-            confidence = 0.55
-            reason = (
-                "Найден один релевантный источник с признаками "
-                "противоречия, но его недостаточно для надёжного "
-                "вывода о фейке."
+                "Найден надёжный источник, который противоречит "
+                "утверждению."
             )
 
         elif contradicting_sources:
             verdict = "НЕИЗВЕСТНО"
-            confidence = 0.5
+            confidence = 0.55
             reason = (
-                "Найдены возможные противоречия, но источники "
-                "недостаточно релевантны или недостаточно надёжны."
+                "Найдены возможные противоречия, но их недостаточно "
+                "для надёжного вывода о фейке."
             )
 
         elif confirming_sources:
@@ -1184,25 +1259,24 @@ class FactChecker:
                 confidence = 0.68
 
             reason = (
-                "Найден релевантный источник, в предложении которого "
-                "совпало минимум три ключевых слова утверждения."
+                "Найден релевантный источник, подтверждающий "
+                "утверждение."
             )
 
         elif partially_confirming_sources:
             verdict = "НЕИЗВЕСТНО"
             confidence = 0.55
             reason = (
-                "Найдены источники, частично связанные с утверждением, "
-                "но для подтверждения нужно совпадение минимум трёх "
-                "ключевых слов."
+                "Найдены источники, частично подтверждающие "
+                "утверждение, но доказательства недостаточно точны."
             )
 
         elif relevant_sources:
             verdict = "НЕИЗВЕСТНО"
             confidence = 0.5
             reason = (
-                "Найдены источники по теме, но в них нет предложения "
-                "с минимум тремя ключевыми словами из утверждения."
+                "Найдены источники по теме, но они не подтверждают "
+                "и не опровергают утверждение."
             )
 
         else:
@@ -1218,4 +1292,61 @@ class FactChecker:
             "confidence": confidence,
             "reason": reason,
             "details": details
+        }
+
+    def _combine_results(self, results):
+        verdicts = [
+            result["verdict"] for result in results
+        ]
+
+        if "ФЕЙК" in verdicts:
+            final_verdict = "ФЕЙК"
+            reason = (
+                "В утверждении найдена часть, которая противоречит "
+                "источникам."
+            )
+
+        elif "ПРАВДА" in verdicts and "НЕИЗВЕСТНО" in verdicts:
+            final_verdict = "НЕИЗВЕСТНО"
+            reason = (
+                "Часть утверждений подтверждена, но не все удалось "
+                "надёжно проверить."
+            )
+
+        elif verdicts and all(
+            verdict == "ПРАВДА" for verdict in verdicts
+        ):
+            final_verdict = "ПРАВДА"
+            reason = (
+                "Все смысловые части утверждения подтверждены "
+                "источниками."
+            )
+
+        else:
+            final_verdict = "НЕИЗВЕСТНО"
+            reason = (
+                "Не удалось найти достаточно надёжных источников "
+                "для проверки."
+            )
+
+        all_details = []
+
+        for result in results:
+            all_details.extend(
+                result.get("details", [])
+            )
+
+        confidence = 0.0
+
+        if results:
+            confidence = sum(
+                result.get("confidence", 0)
+                for result in results
+            ) / len(results)
+
+        return {
+            "verdict": final_verdict,
+            "confidence": confidence,
+            "reason": reason,
+            "details": all_details
         }
