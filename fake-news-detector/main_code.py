@@ -89,212 +89,93 @@ SYNONYMS = {
 }
 
 TRUSTED_DOMAINS = {
-    # Энциклопедии, наука и образование
     "wikipedia.org": 1.0,
-    "britannica.com": 0.9,
-    "oxfordreference.com": 0.95,
-    "cambridge.org": 0.95,
-    "nature.com": 0.95,
-    "science.org": 0.95,
-    "sciencedirect.com": 0.9,
-    "springer.com": 0.9,
-    "scholar.google.com": 0.9,
-    "arxiv.org": 0.85,
-    "plos.org": 0.9,
-    "frontiersin.org": 0.8,
-    "mdpi.com": 0.7,
-    "cell.com": 0.95,
-    "jamanetwork.com": 0.95,
-    "nejm.org": 0.95,
-    "bmj.com": 0.95,
-    "thelancet.com": 0.95,
-
-    # Космос, климат, экология и энергетика
     "nasa.gov": 1.0,
     "science.nasa.gov": 1.0,
-    "climate.nasa.gov": 0.95,
-    "earthobservatory.nasa.gov": 0.95,
-    "esa.int": 0.95,
-    "noaa.gov": 1.0,
-    "ipcc.ch": 1.0,
-    "unfccc.int": 0.95,
-    "unep.org": 0.95,
-    "iea.org": 0.95,
-    "eia.gov": 0.9,
-    "irena.org": 0.9,
-    "iucn.org": 0.9,
-    "copernicus.eu": 0.95,
-    "carbonbrief.org": 0.8,
-    "ember-climate.org": 0.85,
-    "metoffice.gov.uk": 0.9,
-    "dwd.de": 0.85,
-    "meteofrance.com": 0.85,
-
-    # Медицина и здоровье
     "who.int": 1.0,
-    "cdc.gov": 1.0,
-    "nih.gov": 1.0,
-    "nimh.nih.gov": 1.0,
-    "medlineplus.gov": 1.0,
-    "hhs.gov": 0.95,
-    "fda.gov": 1.0,
-    "ema.europa.eu": 0.95,
-    "pubmed.ncbi.nlm.nih.gov": 0.95,
-    "cochrane.org": 0.95,
-    "cochranelibrary.com": 0.95,
-    "clinicaltrials.gov": 0.95,
-    "cancer.gov": 0.95,
-    "heart.org": 0.9,
-    "diabetes.org": 0.9,
-    "vaccines.gov": 0.95,
-    "mayoclinic.org": 0.9,
-    "clevelandclinic.org": 0.9,
-    "hopkinsmedicine.org": 0.9,
-    "kff.org": 0.9,
-    "statnews.com": 0.85,
-    "medicalnewstoday.com": 0.7,
-    "healthline.com": 0.7,
-
-    # Международные организации
-    "un.org": 0.95,
-    "news.un.org": 0.95,
-    "unhcr.org": 0.95,
-    "ohchr.org": 0.95,
-    "unicef.org": 0.95,
-    "undp.org": 0.95,
-    "unodc.org": 0.9,
-    "wfp.org": 0.9,
-    "wipo.int": 0.9,
-    "imo.org": 0.9,
-    "icao.int": 0.9,
-    "itu.int": 0.9,
-    "imf.org": 0.95,
-    "worldbank.org": 0.95,
-    "wto.org": 0.9,
-    "ilo.org": 0.9,
-    "fao.org": 0.9,
-    "ifad.org": 0.9,
-    "oecd.org": 0.95,
-    "oecd-ilibrary.org": 0.9,
-    "nato.int": 0.85,
-    "europa.eu": 0.9,
-    "au.int": 0.85,
-    "asean.org": 0.85,
-    "ifrc.org": 0.9,
-    "icrc.org": 0.95,
-
-    # Государственные и официальные источники
+    "un.org": 0.9,
     "gov.ru": 0.9,
     "edu.ru": 0.9,
     "edu": 0.8,
-    "whitehouse.gov": 0.85,
-    "state.gov": 0.9,
-    "commission.europa.eu": 0.95,
-    "ec.europa.eu": 0.95,
-    "census.gov": 0.95,
-    "bls.gov": 0.95,
-    "bea.gov": 0.95,
-    "federalreserve.gov": 0.95,
-    "ecb.europa.eu": 0.95,
-    "bankofengland.co.uk": 0.95,
-    "eur-lex.europa.eu": 0.95,
-    "justice.gov": 0.9,
 
-    # Новости
-    "ria.ru": 0.7,
-    "tass.ru": 0.7,
-    "interfax.ru": 0.7,
-    "bbc.com": 0.8,
-    "reuters.com": 0.9,
-    "apnews.com": 0.9,
-    "theguardian.com": 0.85,
-    "nytimes.com": 0.85,
-    "washingtonpost.com": 0.85,
-    "wsj.com": 0.85,
-    "ft.com": 0.85,
-    "lemonde.fr": 0.85,
-    "dw.com": 0.85,
-    "aljazeera.com": 0.8,
-    "npr.org": 0.85,
-    "cnbc.com": 0.8,
-    "bloomberg.com": 0.85,
-    "economist.com": 0.85,
-
-    # Фактчекинг и медиаграмотность
-    "snopes.com": 0.85,
-    "factcheck.org": 0.9,
-    "politifact.com": 0.95,
-    "factcheck.afp.com": 0.95,
-    "fullfact.org": 0.9,
-    "aap.com.au": 0.85,
-    "firstdraftnews.org": 0.85,
-    "toolbox.google.com": 0.9,
-    "leadstories.com": 0.8,
-    "afp.com": 0.85,
-
-    # Образование, технологии и ИИ
     "ocw.mit.edu": 1.0,
     "mit.edu": 0.95,
     "khanacademy.org": 0.9,
     "plato.stanford.edu": 1.0,
     "stanford.edu": 0.95,
-    "berkeley.edu": 0.9,
-    "ox.ac.uk": 0.95,
-    "cam.ac.uk": 0.95,
-    "core-econ.org": 0.9,
-    "iep.utm.edu": 0.9,
-    "worldhistory.org": 0.85,
-    "greatergood.berkeley.edu": 0.9,
+    "ourworldindata.org": 0.95,
+    "scholar.google.com": 0.9,
+
     "psychologytoday.com": 0.7,
     "deeplearning.ai": 0.85,
+    "medlineplus.gov": 1.0,
+    "worldhistory.org": 0.85,
+    "core-econ.org": 0.9,
+    "greatergood.berkeley.edu": 0.9,
+    "iep.utm.edu": 0.9,
     "freecodecamp.org": 0.8,
     "startupschool.org": 0.75,
+    "firstdraftnews.org": 0.85,
+
+    "cdc.gov": 1.0,
+    "nih.gov": 1.0,
+    "nimh.nih.gov": 1.0,
+    "imf.org": 0.95,
+    "worldbank.org": 0.95,
+    "ipcc.ch": 1.0,
+    "unep.org": 0.95,
+    "iea.org": 0.95,
+    "esa.int": 0.95,
+    "nature.com": 0.95,
+    "cisa.gov": 0.95,
+    "unhcr.org": 0.95,
+    "ohchr.org": 0.95,
+    "noaa.gov": 1.0,
+    "snopes.com": 0.85,
+    "factcheck.org": 0.9,
+
+    "politifact.com": 0.95,
+    "factcheck.afp.com": 0.95,
+    "fullfact.org": 0.9,
+    "aap.com.au": 0.85,
+
+    "unesco.org": 0.95,
+    "wto.org": 0.9,
+    "ilo.org": 0.9,
+    "fao.org": 0.9,
+    "ifad.org": 0.9,
+    "oecd.org": 0.95,
+    "nato.int": 0.85,
+    "europa.eu": 0.9,
+
+    "hhs.gov": 0.95,
+    "fda.gov": 1.0,
+    "ema.europa.eu": 0.95,
+    "science.org": 0.95,
+    "sciencedirect.com": 0.9,
+    "springer.com": 0.9,
+    "bmj.com": 0.95,
+    "thelancet.com": 0.95,
+
+    "copernicus.eu": 0.95,
+    "carbonbrief.org": 0.8,
+    "britannica.com": 0.9,
+    "oxfordreference.com": 0.95,
+    "cambridge.org": 0.95,
     "ai.gov": 0.9,
     "oecd.ai": 0.9,
     "nist.gov": 0.95,
     "openai.com": 0.8,
     "huggingface.co": 0.8,
-    "github.com": 0.7,
-    "stackoverflow.com": 0.7,
+    "eur-lex.europa.eu": 0.95,
+    "justice.gov": 0.9,
 
-    # Данные, исследования и аналитика
-    "ourworldindata.org": 0.95,
-    "statista.com": 0.75,
-    "kaggle.com": 0.7,
-    "datasetsearch.research.google.com": 0.8,
-    "opensanctions.org": 0.85,
-    "opencorporates.com": 0.8,
-    "pewresearch.org": 0.9,
-    "gallup.com": 0.85,
-    "foreignaffairs.com": 0.8,
-    "csis.org": 0.85,
-    "rand.org": 0.9,
-    "sipri.org": 0.9,
-    "crisisgroup.org": 0.9,
-    "hrw.org": 0.85,
-    "freedomhouse.org": 0.85,
-    "rsf.org": 0.85,
-    "cpj.org": 0.85,
-    "reutersinstitute.politics.ox.ac.uk": 0.9,
-
-    # Право, безопасность и миграция
-    "icc-cpi.int": 0.95,
-    "europol.europa.eu": 0.9,
-    "interpol.int": 0.9,
-    "iom.int": 0.9,
-
-    # Спорт
-    "uefa.com": 0.9,
-    "fifa.com": 0.85,
-    "ioc.org": 0.9,
-    "olympics.com": 0.9,
-    "wadaama.org": 0.9,
-
-    # Культура и история
-    "smithsonianmag.com": 0.8,
-    "nationalgeographic.com": 0.85,
-    "britishmuseum.org": 0.9,
-    "metmuseum.org": 0.9
+    "ria.ru": 0.7,
+    "tass.ru": 0.7,
+    "interfax.ru": 0.7,
+    "bbc.com": 0.8,
+    "reuters.com": 0.9,
+    "apnews.com": 0.9
 }
 
 CONTRADICTION_WORDS = [
@@ -820,6 +701,39 @@ def check_sentence_with_nli(claim, sentence):
     except Exception:
         return None, 0.0
 
+def highlight_matched_words(sentence, claim_groups):
+    sentence_words = re.findall(
+        r"[а-яёa-z0-9.,%]+",
+        sentence.lower()
+    )
+
+    highlighted = sentence
+
+    for group in claim_groups:
+        group_stems = set(group)
+
+        for word in sentence_words:
+            word_clean = word.strip(".,;:!?()\"'")
+
+            if not word_clean:
+                continue
+
+            stem = normalize_word(word_clean)
+
+            if stem in group_stems:
+                pattern = re.compile(
+                    r"(?<![\w])" + re.escape(word_clean) + r"(?![\w])",
+                    re.IGNORECASE
+                )
+
+                highlighted = pattern.sub(
+                    f"**{word_clean}**",
+                    highlighted,
+                    count=1
+                )
+
+    return highlighted
+
 def find_best_sentences(claim, text, max_sentences=3):
     sentences = re.split(r"(?<=[.!?])\s+", text)
 
@@ -846,17 +760,21 @@ def find_best_sentences(claim, text, max_sentences=3):
         }
 
         matched_groups = 0
+        matched_words = []
 
         for group in claim_groups:
-            if any(
+            found = any(
                 word in sentence_stems
                 for word in group
-            ):
+            )
+
+            if found:
                 matched_groups += 1
+                matched_words.append(group[0])
 
         coverage = matched_groups / max(len(claim_groups), 1)
 
-        if matched_groups < 2:
+        if matched_groups < 3:
             continue
 
         numeric_check = check_numeric_relation(
@@ -864,13 +782,10 @@ def find_best_sentences(claim, text, max_sentences=3):
             sentence_clean
         )
 
-        nli_status, nli_score = None, 0.0
-
-        if matched_groups >= 3:
-            nli_status, nli_score = check_sentence_with_nli(
-                claim,
-                sentence_clean
-            )
+        nli_status, nli_score = check_sentence_with_nli(
+            claim,
+            sentence_clean
+        )
 
         has_contradiction = any(
             word in sentence_lower
@@ -891,16 +806,21 @@ def find_best_sentences(claim, text, max_sentences=3):
             status = "подтверждает"
         elif matched_groups >= 3 and coverage >= 0.45:
             status = "косвенно подтверждает"
-        elif matched_groups >= 2 and coverage >= 0.35:
-            status = "связан с темой утверждения"
         else:
-            continue
+            status = "связан с темой утверждения"
+
+        highlighted_sentence = highlight_matched_words(
+            sentence_clean,
+            claim_groups
+        )
 
         matches.append({
             "sentence": sentence_clean,
+            "highlighted_sentence": highlighted_sentence,
             "status": status,
             "coverage": coverage,
             "matched_groups": matched_groups,
+            "matched_words": matched_words,
             "numeric_check": numeric_check,
             "nli_status": nli_status,
             "nli_score": nli_score
@@ -955,6 +875,7 @@ def estimate_support(claim, sources):
                 "quotes": sentence_matches,
                 "coverage": best_match["coverage"],
                 "matched_groups": best_match["matched_groups"],
+                "matched_words": best_match["matched_words"],
                 "trust": trust,
                 "score": final_score
             })
@@ -1045,8 +966,13 @@ class FactChecker:
             quote_texts = []
 
             for quote in quotes[:2]:
+                sentence_for_output = quote.get(
+                    "highlighted_sentence",
+                    quote["sentence"]
+                )
+
                 quote_texts.append(
-                    f"«{quote['sentence']}» "
+                    f"«{sentence_for_output}» "
                     f"— источник {quote['status']} утверждению."
                 )
 
@@ -1149,12 +1075,17 @@ class FactChecker:
                 if not sentence:
                     sentence = source.get("title", "")
 
+                highlighted_sentence = highlight_matched_words(
+                    sentence,
+                    claim_groups
+                )
+
                 details.append({
                     "fact": source.get("title", ""),
                     "source": source.get("source", ""),
                     "reason": (
                         f"Источник связан с темой утверждения: "
-                        f"«{sentence}»"
+                        f"«{highlighted_sentence}»"
                     ),
                     "links": [source.get("url", "")] if source.get("url") else [],
                     "result": None
@@ -1253,8 +1184,8 @@ class FactChecker:
                 confidence = 0.68
 
             reason = (
-                "Найден релевантный источник, который подтверждает "
-                "утверждение минимум по трём смысловым группам."
+                "Найден релевантный источник, в предложении которого "
+                "совпало минимум три ключевых слова утверждения."
             )
 
         elif partially_confirming_sources:
@@ -1262,16 +1193,16 @@ class FactChecker:
             confidence = 0.55
             reason = (
                 "Найдены источники, частично связанные с утверждением, "
-                "но для подтверждения нужно совпадение минимум по "
-                "трём смысловым группам."
+                "но для подтверждения нужно совпадение минимум трёх "
+                "ключевых слов."
             )
 
         elif relevant_sources:
             verdict = "НЕИЗВЕСТНО"
             confidence = 0.5
             reason = (
-                "Найдены источники по теме, но в них нет достаточно "
-                "точного подтверждения или опровержения утверждения."
+                "Найдены источники по теме, но в них нет предложения "
+                "с минимум тремя ключевыми словами из утверждения."
             )
 
         else:
