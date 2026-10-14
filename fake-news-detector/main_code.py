@@ -18,7 +18,10 @@ try:
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
 
-CACHE_FILE = "cache.json"
+CACHE_FILE = os.path.join(
+    os.path.dirname(__file__),
+    "cache.json"
+)
 
 if os.path.exists(CACHE_FILE):
     try:
