@@ -231,9 +231,6 @@ def get_claim_words(text):
 
 
 def split_into_claims(text):
-    """
-    Разбивает текст на короткие смысловые утверждения.
-    """
     text = clean_text(text)
 
     sentences = re.split(r"(?<=[.!?;])\s+", text)
@@ -460,6 +457,40 @@ def search_duckduckgo(claim, max_results=10):
     return results[:max_results]
 
 
+def get_wikipedia_full_text(title):
+    try:
+        api_url = "https://ru.wikipedia.org/w/api.php"
+
+        params = {
+            "action": "query",
+            "prop": "extracts",
+            "explaintext": 1,
+            "titles": title,
+            "format": "json",
+            "utf8": 1
+        }
+
+        response = requests.get(
+            api_url,
+            params=params,
+            timeout=10
+        )
+
+        data = response.json()
+        pages = data.get("query", {}).get("pages", {})
+
+        for page_id, page_data in pages.items():
+            extract = page_data.get("extract", "")
+
+            if extract:
+                return clean_text(extract[:12000])
+
+        return ""
+
+    except Exception:
+        return ""
+
+
 def search_wikipedia_api(claim, max_results=6):
     cache_key = "wiki_" + get_cache_key(claim)
 
@@ -539,10 +570,18 @@ def search_wikipedia_api(claim, max_results=6):
                     url = page_data.get("fullurl", "")
 
                     if extract and url:
+                        full_text = get_wikipedia_full_text(title)
+
+                        body = (
+                            full_text
+                            if full_text
+                            else clean_text(extract)
+                        )
+
                         results.append({
                             "title": title,
                             "summary": clean_text(extract),
-                            "body": clean_text(extract),
+                            "body": body,
                             "url": url,
                             "source": "Wikipedia"
                         })
@@ -802,7 +841,7 @@ def find_best_sentences(claim, text, max_sentences=3):
     for sentence in sentences:
         sentence_clean = sentence.strip()
 
-        if len(sentence_clean) < 30:
+        if len(sentence_clean) < 20:
             continue
 
         sentence_lower = sentence_clean.lower()
@@ -834,7 +873,7 @@ def find_best_sentences(claim, text, max_sentences=3):
             len(claim_groups), 1
         )
 
-        if matched_groups < 2:
+        if matched_groups < 1:
             continue
 
         numeric_check = check_numeric_relation(
@@ -855,22 +894,22 @@ def find_best_sentences(claim, text, max_sentences=3):
         if numeric_check == "противоречит":
             status = "противоречит"
 
-        elif nli_status == "противоречит" and nli_score >= 0.70:
+        elif nli_status == "противоречит" and nli_score >= 0.65:
             status = "противоречит"
 
         elif numeric_check == "подтверждает":
             status = "подтверждает"
 
-        elif nli_status == "подтверждает" and nli_score >= 0.65:
+        elif nli_status == "подтверждает" and nli_score >= 0.60:
             status = "подтверждает"
 
         elif has_contradiction:
             status = "противоречит"
 
-        elif matched_groups >= 3 and coverage >= 0.5:
+        elif matched_groups >= 2 and coverage >= 0.35:
             status = "подтверждает"
 
-        elif matched_groups >= 2 and coverage >= 0.3:
+        elif matched_groups >= 1 and coverage >= 0.15:
             status = "косвенно подтверждает"
 
         else:
@@ -1134,7 +1173,7 @@ class FactChecker:
                 len(claim_groups), 1
             )
 
-            if matched_groups >= 2 and coverage >= 0.30:
+            if matched_groups >= 1 and coverage >= 0.15:
                 relevant_sources.append({
                     "source": source,
                     "coverage": coverage,
@@ -1164,7 +1203,7 @@ class FactChecker:
                 sentence = ""
 
                 for sentence_candidate in sentences:
-                    if len(sentence_candidate.strip()) > 30:
+                    if len(sentence_candidate.strip()) > 20:
                         sentence = sentence_candidate.strip()
                         break
 
