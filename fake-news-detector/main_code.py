@@ -453,8 +453,9 @@ def search_duckduckgo(claim, max_results=10):
     except Exception:
         pass
 
-    search_cache[cache_key] = results[:max_results]
-    save_cache()
+    if results:
+        search_cache[cache_key] = results[:max_results]
+        save_cache()
 
     return results[:max_results]
 
@@ -468,7 +469,17 @@ def search_wikipedia_api(claim, max_results=6):
     results = []
     seen_titles = set()
 
-    queries = make_search_queries(claim)
+    queries = [claim]
+
+    words = get_base_words(claim)
+
+    if len(words) >= 2:
+        queries.append(" ".join(words))
+
+    if len(words) >= 3:
+        queries.append(" ".join(words[:4]))
+
+    queries = list(dict.fromkeys(queries))
 
     for query in queries:
         try:
@@ -478,7 +489,7 @@ def search_wikipedia_api(claim, max_results=6):
                 "action": "query",
                 "list": "search",
                 "srsearch": query,
-                "srlimit": 3,
+                "srlimit": 5,
                 "format": "json",
                 "utf8": 1
             }
@@ -549,8 +560,9 @@ def search_wikipedia_api(claim, max_results=6):
             seen_urls.add(result["url"])
             unique_results.append(result)
 
-    search_cache[cache_key] = unique_results[:max_results]
-    save_cache()
+    if unique_results:
+        search_cache[cache_key] = unique_results[:max_results]
+        save_cache()
 
     return unique_results[:max_results]
 
@@ -651,12 +663,13 @@ def get_relevant_articles(claim, max_articles=5):
 
     articles = articles[:max_articles]
 
-    news_cache[cache_key] = {
-        "time": current_time,
-        "articles": articles
-    }
+    if articles:
+        news_cache[cache_key] = {
+            "time": current_time,
+            "articles": articles
+        }
 
-    save_cache()
+        save_cache()
 
     return articles
 
