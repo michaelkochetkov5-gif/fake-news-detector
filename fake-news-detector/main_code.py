@@ -22,6 +22,7 @@ CACHE_FILE = os.path.join(
     os.path.dirname(__file__),
     "cache.json"
 )
+FACTCHECKER_VERSION = "v4-nli-0.60"
 
 if os.path.exists(CACHE_FILE):
     try:
