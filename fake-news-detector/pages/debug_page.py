@@ -150,3 +150,42 @@ if st.button("Проверить NLI"):
 
     st.write(f"Результат: **{status}**")
     st.write(f"Уверенность: **{round(score * 100, 1)}%**")
+st.divider()
+
+st.subheader("6. Сырой ответ NLI-модели")
+
+from transformers import pipeline
+
+@st.cache_resource
+def load_raw_nli():
+    return pipeline(
+        "text-classification",
+        model="MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7",
+        truncation=True
+    )
+
+raw_nli = load_raw_nli()
+
+raw_sentence = st.text_area(
+    "Предложение из источника",
+    value=(
+        "Ещё в VI в. до нашей эры Пифагор считал, "
+        "что Земля имеет шарообразную форму."
+    )
+)
+
+raw_claim = st.text_area(
+    "Проверяемое утверждение",
+    value="Земля имеет форму шара."
+)
+
+if st.button("Показать сырой ответ NLI"):
+    result = raw_nli(
+        {
+            "text": raw_sentence,
+            "text_pair": raw_claim
+        }
+    )
+
+    st.write("Полный ответ модели:")
+    st.json(result)
