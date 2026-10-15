@@ -167,19 +167,24 @@ def load_raw_nli():
 raw_nli = load_raw_nli()
 
 raw_sentence = st.text_area(
-    "Предложение из источника",
+    "Предложение из источника для сырого NLI",
     value=(
         "Ещё в VI в. до нашей эры Пифагор считал, "
         "что Земля имеет шарообразную форму."
-    )
+    ),
+    key="raw_nli_sentence"
 )
 
 raw_claim = st.text_area(
-    "Проверяемое утверждение",
-    value="Земля имеет форму шара."
+    "Проверяемое утверждение для сырого NLI",
+    value="Земля имеет форму шара.",
+    key="raw_nli_claim"
 )
 
-if st.button("Показать сырой ответ NLI"):
+if st.button(
+    "Показать сырой ответ NLI",
+    key="raw_nli_button"
+):
     result = raw_nli(
         {
             "text": raw_sentence,
