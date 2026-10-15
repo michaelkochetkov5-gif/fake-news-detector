@@ -507,11 +507,8 @@ def search_wikipedia_api(claim, max_results=6):
 
     words = get_base_words(claim)
 
-    if len(words) >= 2:
-        queries.append(" ".join(words))
-
-    if len(words) >= 3:
-        queries.append(" ".join(words[:4]))
+    if words:
+        queries.append(" ".join(words[:5]))
 
     queries = list(dict.fromkeys(queries))
 
@@ -519,77 +516,61 @@ def search_wikipedia_api(claim, max_results=6):
         try:
             api_url = "https://ru.wikipedia.org/w/api.php"
 
-            search_params = {
+            params = {
                 "action": "query",
+                "format": "json",
                 "list": "search",
                 "srsearch": query,
                 "srlimit": 5,
-                "format": "json",
+                "srprop": "snippet",
                 "utf8": 1
             }
 
             response = requests.get(
                 api_url,
-                params=search_params,
-                timeout=10
+                params=params,
+                timeout=15,
+                headers={
+                    "User-Agent": "FakeNewsDetector/1.0"
+                }
             )
 
+            if response.status_code != 200:
+                continue
+
             data = response.json()
+
             pages = data.get("query", {}).get("search", [])
 
             for page in pages:
                 title = page.get("title", "")
+                snippet = page.get("snippet", "")
 
-                if title in seen_titles:
+                if not title or title in seen_titles:
                     continue
 
                 seen_titles.add(title)
 
-                extract_params = {
-                    "action": "query",
-                    "prop": "extracts|info",
-                    "explaintext": 1,
-                    "exintro": 1,
-                    "inprop": "url",
-                    "titles": title,
-                    "format": "json",
-                    "utf8": 1
-                }
+                snippet = re.sub(r"<[^>]+>", "", snippet)
 
-                extract_response = requests.get(
-                    api_url,
-                    params=extract_params,
-                    timeout=10
+                page_url = (
+                    "https://ru.wikipedia.org/wiki/"
+                    + requests.utils.quote(title)
                 )
 
-                extract_data = extract_response.json()
+                full_text = get_wikipedia_full_text(title)
 
-                pages_data = extract_data.get(
-                    "query", {}
-                ).get("pages", {})
+                body = full_text if full_text else snippet
 
-                for page_id, page_data in pages_data.items():
-                    extract = page_data.get("extract", "")
-                    url = page_data.get("fullurl", "")
+                results.append({
+                    "title": title,
+                    "summary": snippet,
+                    "body": body,
+                    "url": page_url,
+                    "source": "Wikipedia"
+                })
 
-                    if extract and url:
-                        full_text = get_wikipedia_full_text(title)
-
-                        body = (
-                            full_text
-                            if full_text
-                            else clean_text(extract)
-                        )
-
-                        results.append({
-                            "title": title,
-                            "summary": clean_text(extract),
-                            "body": body,
-                            "url": url,
-                            "source": "Wikipedia"
-                        })
-
-            time.sleep(0.5)
+            time.sleep(0.3)
 
         except Exception:
             continue
@@ -607,7 +588,6 @@ def search_wikipedia_api(claim, max_results=6):
         save_cache()
 
     return unique_results[:max_results]
-
 
 RSS_FEEDS = [
     {
