@@ -466,29 +466,36 @@ def get_wikipedia_full_text(title):
 
         params = {
             "action": "query",
-            "prop": "extracts",
-            "explaintext": 1,
-            "titles": title,
             "format": "json",
-            "utf8": 1
+            "formatversion": "2",
+            "prop": "extracts",
+            "explaintext": "1",
+            "redirects": "1",
+            "titles": title
         }
 
         response = requests.get(
             api_url,
             params=params,
-            timeout=10
+            timeout=15,
+            headers={
+                "User-Agent": "FakeNewsDetector/1.0"
+            }
         )
 
+        if response.status_code != 200:
+            return ""
+
         data = response.json()
-        pages = data.get("query", {}).get("pages", {})
 
-        for page_id, page_data in pages.items():
-            extract = page_data.get("extract", "")
+        pages = data.get("query", {}).get("pages", [])
 
-            if extract:
-                return clean_text(extract[:12000])
+        if not pages:
+            return ""
 
-        return ""
+        extract = pages[0].get("extract", "")
+
+        return clean_text(extract[:12000])
 
     except Exception:
         return ""
