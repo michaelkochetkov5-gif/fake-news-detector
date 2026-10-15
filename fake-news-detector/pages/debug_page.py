@@ -123,3 +123,30 @@ if st.button("Проверить DuckDuckGo"):
         st.write(result["url"])
         st.write(result["body"][:300])
         st.divider()
+st.divider()
+
+st.subheader("5. Проверка NLI")
+
+from main_code import check_sentence_with_nli
+
+nli_sentence = st.text_area(
+    "Предложение из источника",
+    value=(
+        "Ещё в VI в. до нашей эры Пифагор считал, "
+        "что Земля имеет шарообразную форму."
+    )
+)
+
+nli_claim = st.text_area(
+    "Проверяемое утверждение",
+    value="Земля имеет форму шара."
+)
+
+if st.button("Проверить NLI"):
+    status, score = check_sentence_with_nli(
+        nli_claim,
+        nli_sentence
+    )
+
+    st.write(f"Результат: **{status}**")
+    st.write(f"Уверенность: **{round(score * 100, 1)}%**")
