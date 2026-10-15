@@ -748,7 +748,7 @@ def check_sentence_with_nli(claim, sentence):
         label = result["labels"][0]
         score = result["scores"][0]
 
-        if label == "entailment" and score >= 0.60:
+        if label == "entailment" and score >= 0.50:
             return "подтверждает", score
 
         if label == "contradiction" and score >= 0.70:
