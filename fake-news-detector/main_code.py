@@ -326,6 +326,15 @@ def make_search_queries(claim):
     if len(words) >= 3:
         queries.append(" ".join(words[:4]))
 
+    factcheck_queries = [
+        claim + " миф",
+        claim + " опровергнут",
+        claim + " фейк",
+        claim + " дезинформация"
+    ]
+
+    queries.extend(factcheck_queries)
+
     return list(dict.fromkeys(queries))
 
 
@@ -388,7 +397,7 @@ def search_duckduckgo(claim, max_results=10):
                         query,
                         region="ru-ru",
                         safesearch="moderate",
-                        max_results=5
+                        max_results=3
                     )
 
                     for result in web_results:
@@ -409,46 +418,10 @@ def search_duckduckgo(claim, max_results=10):
                                 "source": "DuckDuckGo"
                             })
 
-                    time.sleep(1)
+                    time.sleep(0.5)
 
                 except Exception:
                     continue
-
-            try:
-                news_results = ddgs.news(
-                    claim,
-                    region="ru-ru",
-                    safesearch="moderate",
-                    max_results=5
-                )
-
-                for result in news_results:
-                    url = (
-                        result.get("href", "")
-                        or result.get("url", "")
-                    )
-
-                    if url and url not in seen_urls:
-                        seen_urls.add(url)
-
-                        results.append({
-                            "title": result.get("title", ""),
-                            "summary": clean_text(
-                                result.get("body", "")
-                            ),
-                            "body": clean_text(
-                                result.get("body", "")
-                            ),
-                            "url": url,
-                            "source": result.get(
-                                "source", "DuckDuckGo News"
-                            )
-                        })
-
-                time.sleep(1)
-
-            except Exception:
-                pass
 
     except Exception:
         pass
@@ -595,6 +568,7 @@ def search_wikipedia_api(claim, max_results=6):
         save_cache()
 
     return unique_results[:max_results]
+
 
 RSS_FEEDS = [
     {
@@ -1116,8 +1090,10 @@ class FactChecker:
 
             if has_contradiction and not has_confirmation:
                 result = False
-            elif has_confirmation or has_partial_confirmation:
+            elif has_confirmation:
                 result = True
+            elif has_partial_confirmation:
+                result = None
             else:
                 result = None
 
@@ -1301,16 +1277,16 @@ class FactChecker:
                 confidence = 0.68
 
             reason = (
-                "Найден релевантный источник, подтверждающий "
-                "утверждение."
+                "Найден релевантный источник, который подтверждает "
+                "утверждение по смыслу."
             )
 
         elif partially_confirming_sources:
             verdict = "НЕИЗВЕСТНО"
             confidence = 0.55
             reason = (
-                "Найдены источники, частично подтверждающие "
-                "утверждение, но доказательства недостаточно точны."
+                "Найдены источники по теме, но они не подтверждают "
+                "утверждение по смыслу."
             )
 
         elif relevant_sources:
