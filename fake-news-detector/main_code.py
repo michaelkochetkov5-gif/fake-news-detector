@@ -736,17 +736,25 @@ def check_sentence_with_nli(claim, sentence):
 
     try:
         result = nli_model(
-            sentence,
-            candidate_labels=[
-                "утверждение подтверждается",
-                "утверждение противоречит источнику",
-                "источник не относится к утверждению"
-            ],
-            hypothesis_template="Этот текст означает, что {}."
+            {
+                "text": sentence,
+                "text_pair": claim
+            }
         )
 
-        label = result["labels"][0]
-        score = result["scores"][0]
+        if isinstance(result, list):
+            result = result[0]
+
+        label = result.get("label", "").lower()
+        score = float(result.get("score", 0))
+
+        print(
+            "NLI DEBUG:",
+            "claim =", claim,
+            "| sentence =", sentence[:100],
+            "| label =", label,
+            "| score =", score
+        )
 
         if label == "entailment" and score >= 0.50:
             return "подтверждает", score
@@ -756,7 +764,9 @@ def check_sentence_with_nli(claim, sentence):
 
         return "нейтрально", score
 
-    except Exception:
+    except Exception as e:
+        print("NLI ERROR:", e)
+
         return None, 0.0
 
 
