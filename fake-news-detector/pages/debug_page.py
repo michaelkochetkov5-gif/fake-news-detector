@@ -9,7 +9,9 @@ from main_code import (
 )
 
 st.title("🔧 Отладка фактчекера")
+from main_code import FACTCHECKER_VERSION
 
+st.info(f"Активная версия фактчекера: {FACTCHECKER_VERSION}")
 st.subheader("1. Проверка ML-модели")
 
 model_paths = [
