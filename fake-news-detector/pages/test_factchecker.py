@@ -70,17 +70,19 @@ def load_fact_checker():
 def load_style_model():
     try:
         model = joblib.load(
-            "russian_fake_news_model_lemma_best.pkl"
+            "fake-news-detector/russian_fake_news_model_lemma_best.pkl"
         )
+
         vectorizer = joblib.load(
-            "russian_fake_news_vectorizer_lemma.pkl"
+            "fake-news-detector/russian_fake_news_vectorizer_lemma.pkl"
         )
 
         return model, vectorizer
 
-    except (FileNotFoundError, OSError):
-        return None, None
+    except Exception as e:
+        st.error(f"Ошибка загрузки ML-модели: {e}")
 
+        return None, None
 
 fact_checker = load_fact_checker()
 model, vectorizer = load_style_model()
