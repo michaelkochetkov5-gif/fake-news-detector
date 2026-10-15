@@ -897,7 +897,7 @@ def find_best_sentences(claim, text, max_sentences=3):
             status = "противоречит"
 
         elif matched_groups >= 2 and coverage >= 0.35:
-            status = "подтверждает"
+            status = "косвенно подтверждает"
 
         elif matched_groups >= 1 and coverage >= 0.15:
             status = "косвенно подтверждает"
