@@ -9,6 +9,16 @@ from main_code import (
 )
 
 st.title("🔧 Отладка фактчекера")
+from main_code import NLI_LOAD_ERROR, nli_model
+
+if nli_model is None:
+    st.error("NLI-модель не загружена")
+
+    if NLI_LOAD_ERROR:
+        st.error(f"Причина: {NLI_LOAD_ERROR}")
+
+else:
+    st.success("NLI-модель загружена")
 from main_code import FACTCHECKER_VERSION
 
 st.info(f"Активная версия фактчекера: {FACTCHECKER_VERSION}")
