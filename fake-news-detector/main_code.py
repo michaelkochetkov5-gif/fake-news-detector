@@ -151,17 +151,30 @@ DECLINE_WORDS = [
 ]
 
 
+NLI_LOAD_ERROR = None
+
+
 @st.cache_resource
 def load_nli_model():
+    global NLI_LOAD_ERROR
+
     if not TRANSFORMERS_AVAILABLE:
+        NLI_LOAD_ERROR = "transformers не установлен"
         return None
 
     try:
-        return pipeline(
-            "zero-shot-classification",
-            model="joeddav/xlm-roberta-large-xnli"
+        model = pipeline(
+            "text-classification",
+            model="MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7",
+            truncation=True
         )
-    except Exception:
+
+        NLI_LOAD_ERROR = None
+        return model
+
+    except Exception as e:
+        NLI_LOAD_ERROR = str(e)
+        print("NLI LOAD ERROR:", e)
         return None
 
 
