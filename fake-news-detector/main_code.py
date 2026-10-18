@@ -150,7 +150,6 @@ DECLINE_WORDS = [
     "упадёт", "упадут", "падение", "падения", "спад", "спада"
 ]
 
-
 NLI_LOAD_ERROR = None
 
 
@@ -179,7 +178,6 @@ def load_nli_model():
 
 
 nli_model = load_nli_model()
-
 
 def clean_text(text):
     if not text:
