@@ -22,7 +22,8 @@ CACHE_FILE = os.path.join(
     os.path.dirname(__file__),
     "cache.json"
 )
-FACTCHECKER_VERSION = "v4-nli-0.60"
+
+FACTCHECKER_VERSION = "v5-nli-0.50"
 
 if os.path.exists(CACHE_FILE):
     try:
@@ -179,6 +180,7 @@ def load_nli_model():
 
 nli_model = load_nli_model()
 
+
 def clean_text(text):
     if not text:
         return ""
@@ -224,25 +226,6 @@ def get_claim_word_groups(text):
         groups.append(list(dict.fromkeys(group)))
 
     return groups
-
-
-def get_claim_words(text):
-    words = get_base_words(text)
-
-    expanded = []
-
-    for word in words:
-        expanded.append(word)
-
-        if word in SYNONYMS:
-            expanded.extend(SYNONYMS[word])
-
-    normalized = [
-        normalize_word(word)
-        for word in expanded
-    ]
-
-    return list(dict.fromkeys(normalized))
 
 
 def split_into_claims(text):
@@ -340,9 +323,7 @@ def make_search_queries(claim):
 
     factcheck_queries = [
         claim + " миф",
-        claim + " опровергнут",
-        claim + " фейк",
-        claim + " дезинформация"
+        claim + " опровергнут"
     ]
 
     queries.extend(factcheck_queries)
@@ -759,14 +740,6 @@ def check_sentence_with_nli(claim, sentence):
         label = result.get("label", "").lower()
         score = float(result.get("score", 0))
 
-        print(
-            "NLI DEBUG:",
-            "claim =", claim,
-            "| sentence =", sentence[:100],
-            "| label =", label,
-            "| score =", score
-        )
-
         if label == "entailment" and score >= 0.50:
             return "подтверждает", score
 
@@ -782,18 +755,17 @@ def check_sentence_with_nli(claim, sentence):
 
 
 def highlight_matched_words(sentence, claim_groups):
-    sentence_words = re.findall(
-        r"[а-яёa-z0-9.,%]+",
-        sentence.lower()
-    )
-
     highlighted = sentence
 
     for group in claim_groups:
         group_stems = set(group)
 
-        for word in sentence_words:
-            word_clean = word.strip(".,;:!?()\"'")
+        for match in re.finditer(
+            r"[а-яёa-z0-9.,%]+",
+            sentence,
+            flags=re.IGNORECASE
+        ):
+            word_clean = match.group().strip(".,;:!?()\"'")
 
             if not word_clean:
                 continue
@@ -803,13 +775,13 @@ def highlight_matched_words(sentence, claim_groups):
             if stem in group_stems:
                 pattern = re.compile(
                     r"(?<![\w])"
-                    + re.escape(word_clean)
+                    + re.escape(match.group())
                     + r"(?![\w])",
-                    re.IGNORECASE
+                    flags=re.IGNORECASE
                 )
 
                 highlighted = pattern.sub(
-                    f"**{word_clean}**",
+                    f"**{match.group()}**",
                     highlighted,
                     count=1
                 )
@@ -880,13 +852,13 @@ def find_best_sentences(claim, text, max_sentences=3):
         if numeric_check == "противоречит":
             status = "противоречит"
 
-        elif nli_status == "противоречит" and nli_score >= 0.65:
+        elif nli_status == "противоречит":
             status = "противоречит"
 
         elif numeric_check == "подтверждает":
             status = "подтверждает"
 
-        elif nli_status == "подтверждает" and nli_score >= 0.60:
+        elif nli_status == "подтверждает":
             status = "подтверждает"
 
         elif has_contradiction:
@@ -948,7 +920,7 @@ def estimate_support(claim, sources):
         sentence_matches = find_best_sentences(
             claim,
             text,
-            max_sentences=3
+            max_sentences=2
         )
 
         if sentence_matches:
@@ -1057,7 +1029,7 @@ class FactChecker:
             if url and url not in pages_to_open:
                 pages_to_open.append(url)
 
-        pages_to_open = pages_to_open[:5]
+        pages_to_open = pages_to_open[:3]
 
         for url in pages_to_open:
             page_text = get_page_text(url)
@@ -1114,8 +1086,6 @@ class FactChecker:
                 result = False
             elif has_confirmation:
                 result = True
-            elif has_partial_confirmation:
-                result = None
             else:
                 result = None
 
