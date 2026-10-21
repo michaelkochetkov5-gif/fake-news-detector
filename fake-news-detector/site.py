@@ -8,6 +8,9 @@ from main_code import FactChecker
 from scipy.special import expit
 from datetime import datetime
 
+# БАГ 1: единая константа для метки фейка
+FAKE_LABEL = 0
+
 # ===== ФАКТЧЕКЕР =====
 @st.cache_resource
 def load_fact_checker():
@@ -61,6 +64,10 @@ def clean_text(text):
     return text.lower()
 
 def lemmatize_text(text):
+    """
+    Лемматизация для отображения в UI.
+    НЕ используется для ML-инференса (БАГ 2).
+    """
     words = text.split()
     lemmas = []
 
@@ -78,17 +85,29 @@ def analyze_style(text):
         return None, 0.0, ""
 
     cleaned = clean_text(text)
-    lemmatized = lemmatize_text(cleaned)
-    vectorized = vectorizer.transform([lemmatized])
+    
+    # БАГ 2: убираем лемматизацию перед vectorizer.transform
+    # Модель обучена на сырых текстах, подаём cleaned напрямую
+    vectorized = vectorizer.transform([cleaned])
 
     prediction = model.predict(vectorized)[0]
 
     try:
         probabilities = model.predict_proba(vectorized)[0]
+        # БАГ 1: находим индекс FAKE_LABEL вместо жёсткого индекса
+        try:
+            fake_idx = list(model.classes_).index(FAKE_LABEL)
+            fake_prob = probabilities[fake_idx]
+        except (ValueError, AttributeError):
+            fake_prob = probabilities[0]
+        
         confidence = max(probabilities) * 100
     except Exception:
         decision = model.decision_function(vectorized)[0]
-        confidence = expit(decision) * 100
+        confidence = expit(abs(decision)) * 100
+
+    # Для отображения в UI сохраняем лемматизированную версию
+    lemmatized = lemmatize_text(cleaned)
 
     return prediction, confidence, lemmatized
 
@@ -263,9 +282,10 @@ if check_button or "example" in st.session_state:
 
         st.session_state.stats["total"] += 1
 
-        if prediction == 0:
+        # Статистика по семантике: 0 = ФЕЙК, 1 = ПРАВДА
+        if prediction == FAKE_LABEL:
             st.session_state.stats["fake_style"] += 1
-        elif prediction == 1:
+        elif prediction is not None:
             st.session_state.stats["truth_style"] += 1
 
         if fact_result["verdict"] == "ФЕЙК":
@@ -343,14 +363,14 @@ if check_button or "example" in st.session_state:
                     "➖ Не применялся: короткое утверждение, "
                     "решение принимается по фактам."
                 )
-            elif prediction == 0:
+            elif prediction == FAKE_LABEL:
                 st.error(f"❌ ФЕЙК ({confidence:.1f}%)")
             else:
                 st.success(f"✅ ПРАВДА ({confidence:.1f}%)")
 
         # ===== ИТОГ =====
         st.markdown("---")
-        st.subheader("🎯 Итоговый вердикt")
+        st.subheader("🎯 Итоговый вердикт")
 
         if fact_result["verdict"] == "ФЕЙК":
             st.error(
@@ -384,13 +404,13 @@ if check_button or "example" in st.session_state:
             st.write(f"**Причина:** {fact_result['reason']}")
             st.write(
                 f"**Стилевой окрас:** "
-                f"{'ФЕЙК' if prediction == 0 else 'ПРАВДА'} "
+                f"{'ФЕЙК' if prediction == FAKE_LABEL else 'ПРАВДА'} "
                 f"({confidence:.1f}%)"
             )
 
         elif (
             fact_result["verdict"] == "НЕИЗВЕСТНО"
-            and prediction == 0
+            and prediction == FAKE_LABEL
         ):
             st.error(
                 "❌ **Вероятно ФЕЙК** (стилевой окрас)"
