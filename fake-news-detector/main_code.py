@@ -90,9 +90,6 @@ SYNONYMS = {
     "опасен": [
         "вреден", "вредна", "вредно", "опасна", "опасно"
     ],
-    "вызывает": [
-        "приводит", "связан", "связана", "влияет"
-    ],
     "лечит": [
         "помогает", "эффективен", "эффективна"
     ],
@@ -165,7 +162,7 @@ def load_nli_model():
     try:
         model = pipeline(
             "text-classification",
-            model="MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7",
+            model="cointegrated/rubert-base-cased-nli-threeway",
             truncation=True
         )
 
@@ -178,7 +175,7 @@ def load_nli_model():
         return None
 
 
-nli_model = load_nli_model()
+nli_model = None
 
 
 def clean_text(text):
@@ -292,6 +289,27 @@ def split_into_claims(text):
 
     return unique_claims
 
+def classify_claim_importance(claim):
+    text = claim.lower()
+
+    important_markers = [
+        "запрет", "запретят", "запретили", "введут", "ввели",
+        "отменят", "отменили", "разрешат", "разрешили",
+        "убийств", "убивает", "смерт", "вызывает", "вызовут",
+        "докажут", "доказали", "подтвердили", "опроверг",
+        "заблокир", "обязан", "обязаны", "скрывают", "подделан",
+        "полностью", "все люди", "все жители", "никто", "никогда",
+        "заменяет", "заменит", "произойдёт", "произойдет",
+        "пройдёт", "пройдет", "сократится", "вырастет", "составит"
+    ]
+
+    has_numbers = bool(re.search(r"\d", text))
+    has_marker = any(marker in text for marker in important_markers)
+
+    if has_numbers or has_marker:
+        return "important"
+
+    return "context"
 
 def get_domain_trust(url):
     try:
@@ -315,21 +333,10 @@ def make_search_queries(claim):
 
     words = get_base_words(claim)
 
-    if len(words) >= 2:
-        queries.append(" ".join(words))
-
     if len(words) >= 3:
         queries.append(" ".join(words[:4]))
 
-    factcheck_queries = [
-        claim + " миф",
-        claim + " опровергнут"
-    ]
-
-    queries.extend(factcheck_queries)
-
     return list(dict.fromkeys(queries))
-
 
 def get_page_text(url, max_length=12000):
     if not url:
@@ -338,8 +345,10 @@ def get_page_text(url, max_length=12000):
     try:
         headers = {
             "User-Agent": (
-                "Mozilla/5.0 (compatible; FactChecker/1.0)"
-            )
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0 Safari/537.36"
+)
         }
 
         response = requests.get(
@@ -371,7 +380,7 @@ def get_page_text(url, max_length=12000):
         return ""
 
 
-def search_duckduckgo(claim, max_results=10):
+def search_duckduckgo(claim, max_results=5):
     cache_key = "ddg_" + get_cache_key(claim)
 
     if cache_key in search_cache:
@@ -390,7 +399,7 @@ def search_duckduckgo(claim, max_results=10):
                         query,
                         region="ru-ru",
                         safesearch="moderate",
-                        max_results=3
+                        max_results=2
                     )
 
                     for result in web_results:
@@ -445,7 +454,7 @@ def get_wikipedia_full_text(title):
             params=params,
             timeout=15,
             headers={
-                "User-Agent": "FakeNewsDetector/1.0"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
             }
         )
 
@@ -504,7 +513,7 @@ def search_wikipedia_api(claim, max_results=6):
                 params=params,
                 timeout=15,
                 headers={
-                    "User-Agent": "FakeNewsDetector/1.0"
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
                 }
             )
 
@@ -587,7 +596,7 @@ RSS_FEEDS = [
 ]
 
 
-def get_relevant_articles(claim, max_articles=5):
+def get_relevant_articles(claim, max_articles=3):
     cache_key = "news_" + get_cache_key(claim)
 
     current_time = time.time()
@@ -606,7 +615,7 @@ def get_relevant_articles(claim, max_articles=5):
         try:
             parsed_feed = feedparser.parse(feed["url"])
 
-            for entry in parsed_feed.entries[:50]:
+            for entry in parsed_feed.entries[:20]:
                 title = clean_text(entry.get("title", ""))
                 summary = clean_text(entry.get("summary", ""))
 
@@ -731,7 +740,8 @@ def check_sentence_with_nli(claim, sentence):
             {
                 "text": sentence,
                 "text_pair": claim
-            }
+            },
+            truncation=True
         )
 
         if isinstance(result, list):
@@ -740,17 +750,16 @@ def check_sentence_with_nli(claim, sentence):
         label = result.get("label", "").lower()
         score = float(result.get("score", 0))
 
-        if label == "entailment" and score >= 0.50:
+        if "entail" in label and score >= 0.70:
             return "подтверждает", score
 
-        if label == "contradiction" and score >= 0.70:
+        if "contradict" in label and score >= 0.80:
             return "противоречит", score
 
         return "нейтрально", score
 
     except Exception as e:
         print("NLI ERROR:", e)
-
         return None, 0.0
 
 
@@ -839,15 +848,22 @@ def find_best_sentences(claim, text, max_sentences=3):
             sentence_clean
         )
 
-        nli_status, nli_score = check_sentence_with_nli(
-            claim,
-            sentence_clean
-        )
+        nli_status, nli_score = (None, 0.0)
 
-        has_contradiction = any(
-            word in sentence_lower
-            for word in CONTRADICTION_WORDS
-        )
+        if matched_groups >= 2:
+            nli_status, nli_score = check_sentence_with_nli(
+                claim,
+                sentence_clean
+            )
+
+        # БАГ 4: ужесточаем детекцию противоречий - требуем границы слов и >=2 совпадений
+        has_contradiction = False
+        if matched_groups >= 2:
+            for word in CONTRADICTION_WORDS:
+                pattern = r'\b' + re.escape(word) + r'\b'
+                if re.search(pattern, sentence_lower):
+                    has_contradiction = True
+                    break
 
         if numeric_check == "противоречит":
             status = "противоречит"
@@ -864,10 +880,8 @@ def find_best_sentences(claim, text, max_sentences=3):
         elif has_contradiction:
             status = "противоречит"
 
-        elif matched_groups >= 2 and coverage >= 0.35:
-            status = "косвенно подтверждает"
-
-        elif matched_groups >= 1 and coverage >= 0.15:
+        # БАГ 4: ужесточаем порог для "косвенного подтверждения"
+        elif matched_groups >= 3 and coverage >= 0.50:
             status = "косвенно подтверждает"
 
         else:
@@ -991,13 +1005,55 @@ class FactChecker:
         claims = claims[:3]
 
         results = []
+        important_results = []
 
         for claim in claims:
-            results.append(
-                self._verify_single_claim(claim)
-            )
+            result = self._verify_single_claim(claim)
 
-        return self._combine_results(results)
+            if result is None:
+                result = {
+                    "verdict": "НЕИЗВЕСТНО",
+                    "confidence": 0.5,
+                    "reason": "Не удалось проверить часть утверждения.",
+                    "details": [],
+                    "importance": "context"
+                }
+
+            importance = classify_claim_importance(claim)
+            result["importance"] = importance
+            results.append(result)
+
+            if importance == "important":
+                important_results.append(result)
+
+        if important_results:
+            combined = self._combine_results(important_results)
+
+            if combined.get("verdict") != "ФЕЙК":
+                context_results = [
+                    result for result in results
+                    if result.get("importance") == "context"
+                ]
+
+                context_verdicts = [
+                    result.get("verdict") for result in context_results
+                ]
+
+                if context_verdicts and all(
+                    verdict == "ПРАВДА" for verdict in context_verdicts
+                ):
+                    combined["reason"] = (
+                        "Важная часть не подтверждена источниками, "
+                        "но контекстная часть подтверждена; "
+                        "явных противоречий нет."
+                    )
+        else:
+            combined = self._combine_results(results)
+
+        combined["claims_checked"] = len(important_results)
+        combined["claims_total"] = len(results)
+
+        return combined
 
     def _verify_single_claim(self, text):
         duckduckgo_results = search_duckduckgo(text)
@@ -1029,7 +1085,7 @@ class FactChecker:
             if url and url not in pages_to_open:
                 pages_to_open.append(url)
 
-        pages_to_open = pages_to_open[:3]
+        pages_to_open = pages_to_open[:1]
 
         for url in pages_to_open:
             page_text = get_page_text(url)
@@ -1224,7 +1280,20 @@ class FactChecker:
             if item.get("trust", 0.5) >= 0.8
         ]
 
-        if numeric_contradictions:
+        # БАГ 5: собираем всю цепочку вердиктов в единый if/elif/else с правильным приоритетом
+        if (
+            not relevant_sources
+            and not numeric_contradictions
+            and not strong_contradictions
+        ):
+            verdict = "НЕИЗВЕСТНО"
+            confidence = 0.5
+            reason = (
+                "Не найдено релевантных источников для проверки "
+                "утверждения."
+            )
+
+        elif numeric_contradictions:
             verdict = "ФЕЙК"
             confidence = min(
                 0.78 + len(numeric_contradictions) * 0.05,
@@ -1246,14 +1315,6 @@ class FactChecker:
                 "утверждению."
             )
 
-        elif contradicting_sources:
-            verdict = "НЕИЗВЕСТНО"
-            confidence = 0.55
-            reason = (
-                "Найдены возможные противоречия, но их недостаточно "
-                "для надёжного вывода о фейке."
-            )
-
         elif confirming_sources:
             verdict = "ПРАВДА"
 
@@ -1273,20 +1334,20 @@ class FactChecker:
                 "утверждение по смыслу."
             )
 
-        elif partially_confirming_sources:
+        elif partially_confirming_sources and relevant_sources:
+            verdict = "ПРАВДА"
+            confidence = 0.68
+            reason = (
+                "Найдено несколько релевантных источников, которые "
+                "косвенно подтверждают утверждение; явных противоречий нет."
+            )
+
+        elif contradicting_sources:
             verdict = "НЕИЗВЕСТНО"
             confidence = 0.55
             reason = (
-                "Найдены источники по теме, но они не подтверждают "
-                "утверждение по смыслу."
-            )
-
-        elif relevant_sources:
-            verdict = "НЕИЗВЕСТНО"
-            confidence = 0.5
-            reason = (
-                "Найдены источники по теме, но они не подтверждают "
-                "и не опровергают утверждение."
+                "Найдены возможные противоречия, но их недостаточно "
+                "для надёжного вывода о фейке."
             )
 
         else:
@@ -1297,11 +1358,40 @@ class FactChecker:
                 "источников для проверки утверждения."
             )
 
+        # БАГ 3: вычисление importance и корректировка для контекстных claims
+        importance = classify_claim_importance(text)
+
+        if importance == "context":
+            if verdict == "ФЕЙК":
+                final_verdict = "ФЕЙК"
+                final_confidence = confidence
+                final_reason = reason
+            elif verdict == "ПРАВДА":
+                final_verdict = "ПРАВДА"
+                final_confidence = 0.60
+                final_reason = (
+                    "Контекстная часть утверждения подтверждена источниками; "
+                    "противоречий не найдено."
+                )
+            else:
+                final_verdict = "НЕИЗВЕСТНО"
+                final_confidence = 0.50
+                final_reason = (
+                    "Контекстная часть утверждения используется для поиска, "
+                    "но не определяет итоговый вердикт."
+                )
+        else:
+            # БАГ 3: для important claims возвращаем вердикт как есть
+            final_verdict = verdict
+            final_confidence = confidence
+            final_reason = reason
+
         return {
-            "verdict": verdict,
-            "confidence": confidence,
-            "reason": reason,
-            "details": details
+            "verdict": final_verdict,
+            "confidence": final_confidence,
+            "reason": final_reason,
+            "details": details,
+            "importance": importance
         }
 
     def _combine_results(self, results):
@@ -1316,20 +1406,11 @@ class FactChecker:
                 "источникам."
             )
 
-        elif "ПРАВДА" in verdicts and "НЕИЗВЕСТНО" in verdicts:
-            final_verdict = "НЕИЗВЕСТНО"
-            reason = (
-                "Часть утверждений подтверждена, но не все удалось "
-                "надёжно проверить."
-            )
-
-        elif verdicts and all(
-            verdict == "ПРАВДА" for verdict in verdicts
-        ):
+        elif "ПРАВДА" in verdicts:
             final_verdict = "ПРАВДА"
             reason = (
-                "Все смысловые части утверждения подтверждены "
-                "источниками."
+                "Часть утверждений подтверждена источниками; "
+                "явных противоречий не найдено."
             )
 
         else:
