@@ -10,7 +10,7 @@ FAKE_LABEL = 0
 
 # Пути к модели — относительно папки этого файла, чтобы работало
 # и локально, и на Streamlit Cloud независимо от рабочей директории
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_PATH = os.path.join(BASE_DIR, "russian_fake_news_model_lemma_best.pkl")
 VECTORIZER_PATH = os.path.join(BASE_DIR, "russian_fake_news_vectorizer_lemma.pkl")
 
