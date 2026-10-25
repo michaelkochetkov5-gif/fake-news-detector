@@ -53,6 +53,8 @@ def analyze_style(text):
     Независимый вердикт ML-модели.
     Возвращает (вердикт, уверенность в процентах) или (None, 0.0),
     если модель не загружена.
+    Поддерживает модели с predict_proba (LogReg, NaiveBayes)
+    и без него (LinearSVC) — через decision_function.
     """
     if model is None or vectorizer is None:
         return None, 0.0
@@ -60,14 +62,27 @@ def analyze_style(text):
     prepared = prepare_text(text)
     features = vectorizer.transform([prepared])
 
-    proba = model.predict_proba(features)[0]
-
     # БАГ 1: находим индекс FAKE_LABEL в model.classes_ вместо жёсткого индекса [1]
     try:
         fake_idx = list(model.classes_).index(FAKE_LABEL)
-        fake_prob = proba[fake_idx]
     except (ValueError, AttributeError):
-        fake_prob = proba[0]
+        fake_idx = 0
+
+    if hasattr(model, "predict_proba"):
+        # Модель с вероятностями (LogisticRegression, NaiveBayes и т.п.)
+        proba = model.predict_proba(features)[0]
+        fake_prob = proba[fake_idx]
+    elif hasattr(model, "decision_function"):
+        # LinearSVC и другие SVM: расстояние до разделяющей гиперплоскости
+        decision = model.decision_function(features)[0]
+        # Для бинарной классификации decision > 0 обычно означает класс 1
+        # Приводим к вероятности через сигмоиду
+        import math
+        fake_prob = 1.0 / (1.0 + math.exp(decision)) if fake_idx == 0 else 1.0 / (1.0 + math.exp(-decision))
+    else:
+        # Fallback: обычный predict без уверенности
+        prediction = model.predict(features)[0]
+        fake_prob = 1.0 if prediction == FAKE_LABEL else 0.0
 
     if fake_prob >= 0.60:
         return "ФЕЙК", round(fake_prob * 100, 1)
@@ -75,7 +90,6 @@ def analyze_style(text):
         return "ПРАВДА", round((1 - fake_prob) * 100, 1)
     else:
         return "НЕИЗВЕСТНО", round(max(fake_prob, 1 - fake_prob) * 100, 1)
-
 
 fact_checker = FactChecker()
 
