@@ -790,6 +790,63 @@ def search_duckduckgo(claim, max_results=6):
     return results[:max_results]
 
 
+# Википедия требует User-Agent с контактом (политика Wikimedia API).
+# Без него сервер отвечает 403/429, а код раньше молча считал это
+# пустым поиском. Замените адрес на свой.
+WIKI_CONTACT = "your-email@example.com"
+WIKI_USER_AGENT = (
+    "FakeNewsDetector/1.0 (educational project; contact: "
+    + WIKI_CONTACT + ")"
+)
+
+
+def _wiki_get(params, timeout=15, max_retries=1):
+    """
+    GET к ru.wikipedia API с логированием статуса.
+    При 429/503 повторяет запрос, уважая Retry-After (не дольше 5 с).
+    Возвращает (response, None) при успехе или (None, причина).
+    """
+    last_status = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            response = requests.get(
+                "https://ru.wikipedia.org/w/api.php",
+                params=params,
+                timeout=timeout,
+                headers={"User-Agent": WIKI_USER_AGENT}
+            )
+        except Exception as e:
+            print(f"   [Wiki] сетевая ошибка: {type(e).__name__}: {e}")
+            return None, f"exception {type(e).__name__}"
+
+        last_status = response.status_code
+
+        if response.status_code == 200:
+            return response, None
+
+        retry_after = response.headers.get("retry-after", "")
+        print(
+            f"   [Wiki] HTTP {response.status_code} "
+            f"(попытка {attempt + 1}/{max_retries + 1}), "
+            f"Retry-After={retry_after or '-'}"
+        )
+
+        if response.status_code not in (429, 503) or attempt == max_retries:
+            break
+
+        try:
+            # Retry-After от Википедии часто слишком мал (0.1 с) — повтор
+            # сразу снова падает в 429. Ждём не меньше 2 с, не больше 5 с.
+            wait = min(max(float(retry_after), 2.0), 5.0)
+        except ValueError:
+            wait = 2.0
+
+        time.sleep(wait)
+
+    return None, f"HTTP {last_status}"
+
+
 def get_wikipedia_full_text(title):
     try:
         api_url = "https://ru.wikipedia.org/w/api.php"
@@ -804,14 +861,10 @@ def get_wikipedia_full_text(title):
             "titles": title
         }
 
-        response = requests.get(
-            api_url,
-            params=params,
-            timeout=15,
-            headers={"User-Agent": "FakeNewsDetector/1.0 (educational project)"}
-        )
+        response, failure = _wiki_get(params)
 
-        if response.status_code != 200:
+        if response is None:
+            print(f"   [Wiki] полный текст '{title[:50]}' не получен: {failure}")
             return ""
 
         data = response.json()
@@ -864,14 +917,12 @@ def search_wikipedia_api(claim, max_results=6):
                 "utf8": 1
             }
 
-            response = requests.get(
-                api_url,
-                params=params,
-                timeout=15,
-                headers={"User-Agent": "FakeNewsDetector/1.0 (educational project)"}
-            )
+            print(f"   [Wiki query] '{query}'")
 
-            if response.status_code != 200:
+            response, failure = _wiki_get(params)
+
+            if response is None:
+                print(f"   [Wiki] запрос '{query[:50]}' не выполнен: {failure}")
                 continue
 
             data = response.json()
@@ -1087,18 +1138,55 @@ def _country_groups(countries):
     }
 
 
+# P3: хозяйский предикат. Предложение говорит о ПРОВЕДЕНИИ события в стране
+# ("пройдёт в", "примут", "проводится в", "страны-хозяйки"), а не об участии
+# в нём ("сборная X сыграет", "принимает участие").
+_HOST_RE = re.compile(
+    r"(?<![а-яё])("
+    r"пройд[её]т|пройдут|прошл[аи]|прош[её]л|"
+    r"проходит|проходят|проходил\w*|"
+    r"проводит\w*|проводят\w*|проводил\w*|провед[её]н\w*|"
+    r"принима\w*|примут|примет|принял\w*|"
+    r"хозя\w+|страны-организатор\w*|места? проведения"
+    r")(?![а-яё])"
+)
+
+# "принимает участие", "примут участие" — это участие, а не хозяйство.
+_PARTICIPATION_RE = re.compile(
+    r"(?<![а-яё])(принима\w*|примут|примет|принял\w*|принять)\s+участи\w*"
+)
+
+
+def has_host_predicate(text):
+    """True, если в тексте есть хозяйский предикат (а не просто участие)."""
+    if not text:
+        return False
+
+    low = _PARTICIPATION_RE.sub(" ", text.lower())
+
+    return bool(_HOST_RE.search(low))
+
+
 def check_country_conflict(claim, sentence, matched_count, coverage):
     """
     Противоречие по странам — только для действительно взаимоисключающих
     стран (аргентина vs сша), не для совместимых (москва vs ссср).
 
+    P3: конфликт возможен ТОЛЬКО если в предложении источника есть явный
+    хозяйский предикат. Фраза "Аргентина сыграет на ЧМ-2026" — это участие:
+    она не подтверждает и не опровергает, где пройдёт турнир.
+
     Условия:
+      - предложение содержит хозяйский предикат;
       - предложение релевантно: matched_count >= 3 и coverage >= 0.30;
       - если в утверждении есть год, предложение должно содержать ТОТ ЖЕ год
         (иначе это другое событие: ЧМ-1930 в Уругвае не опровергает ЧМ-2026);
       - группы стран не пересекаются.
     """
     if matched_count < 3 or coverage < 0.30:
+        return None
+
+    if not has_host_predicate(sentence):
         return None
 
     claim_years = extract_years(claim)
@@ -1115,11 +1203,55 @@ def check_country_conflict(claim, sentence, matched_count, coverage):
         return None
 
     print(
-        f"      [country_conflict] claim={sorted(claim_groups)} "
+        f"      [country_conflict] хозяйский предикат; "
+        f"claim={sorted(claim_groups)} "
         f"vs sentence={sorted(sentence_groups)} -> противоречит"
     )
 
     return "противоречит"
+
+
+def slots_satisfied(claim, sentence):
+    """
+    P1: обязательные слоты. Если в утверждении есть страны, числа или годы,
+    подтверждение ("подтверждает"/"косвенно") возможно только когда в
+    предложении источника совпал соответствующий слот.
+
+    Строже буквального правила "хотя бы один слот": год или число НЕ заменяют
+    страну. Иначе заголовочные предложения статьи ("Чемпионат мира по
+    футболу 2026") подтверждали бы любое утверждение про ЧМ-2026,
+    независимо от того, в какой стране оно пройдёт.
+
+    Порядок:
+      1) в утверждении есть страны -> нужна общая страна (по группам);
+         если утверждение о проведении события ("пройдёт в ..."), в
+         предложении нужен хозяйский предикат (участие не считается);
+      2) стран нет, но есть числа/годы -> нужно общее число/год;
+      3) слотов нет -> ограничений нет.
+    Возвращает (ok, причина).
+    """
+    claim_groups = _country_groups(extract_countries(claim))
+
+    if claim_groups:
+        sentence_groups = _country_groups(extract_countries(sentence))
+
+        if not (claim_groups & sentence_groups):
+            return False, "нет общей страны"
+
+        if has_host_predicate(claim) and not has_host_predicate(sentence):
+            return False, "страна есть, хозяйского предиката нет (участие)"
+
+        return True, "страна"
+
+    claim_numbers = extract_numbers(claim)
+
+    if claim_numbers:
+        if not (claim_numbers & extract_numbers(sentence)):
+            return False, "нет общего числа/года"
+
+        return True, "число/год"
+
+    return True, "слотов нет"
 
 
 def check_sentence_with_nli(claim, sentence):
@@ -1224,7 +1356,17 @@ def find_best_sentences(claim, text, max_sentences=3):
     weights = dict(key_terms[:10])
     total_weight = sum(weights.values()) or 1.0
 
-    sentences = re.split(r"(?<=[.!?])\s+", text)
+    # CLAUSE_SPLIT_FIX: режем текст источника по заголовкам Википедии
+    # (===, ==) и по клаузам (. ! ? ; : и тире с пробелами) ДО разбивки на
+    # предложения. Хозяйский предикат и страна должны совпасть внутри одной
+    # клаузы, иначе обломок вида "Финал 2026 — ... США, прошёл в ..." даёт
+    # ложное подтверждение, потому что страны и предикат попали в одну
+    # строку, но из разных фраз.
+    sentences = []
+    for chunk in re.split(r"=+", text):
+        sentences.extend(
+            re.split(r"(?<=[.!?;:])\s+|\s[—–]\s", chunk)
+        )
 
     # Годы утверждения и годы заголовка источника (первый фрагмент текста —
     # это title, так его собирает estimate_support).
@@ -1289,7 +1431,9 @@ def find_best_sentences(claim, text, max_sentences=3):
             claim_geo and sentence_geo and not (claim_geo & sentence_geo)
         )
         year_mismatch = year_check == "противоречит"
-        block_confirm = geo_mismatch or year_mismatch
+        # P1: обязательные слоты (страны/числа/годы утверждения).
+        slots_ok, slot_reason = slots_satisfied(claim, sentence_clean)
+        block_confirm = geo_mismatch or year_mismatch or not slots_ok
 
         if numeric_check == "противоречит":
             status = "противоречит"
@@ -1315,7 +1459,8 @@ def find_best_sentences(claim, text, max_sentences=3):
         print(
             f"      [sentence] matched={matched_count} "
             f"coverage={coverage:.2f} year_mismatch={year_mismatch} "
-            f"geo_mismatch={geo_mismatch} status={status}"
+            f"geo_mismatch={geo_mismatch} slots_ok={slots_ok} "
+            f"({slot_reason}) status={status}"
         )
 
         matches.append({
@@ -1685,6 +1830,21 @@ class FactChecker:
             confidence = min(0.72 + len(strong_contradictions) * 0.04, 0.9)
             reason = (
                 "Надёжный источник прямо противоречит утверждению."
+            )
+
+        # P6: если есть и подтверждение, и противоречие (слабое — доверие
+        # источника < 0.8, иначе сработала бы ветка strong_contradictions
+        # выше), это спорный случай: ПРАВДА не выдаём.
+        elif (
+            (confirming_sources or partially_confirming_sources)
+            and contradicting_sources
+        ):
+            verdict = "НЕИЗВЕСТНО"
+            confidence = 0.5
+            reason = (
+                "Источники расходятся: одни подтверждают утверждение, "
+                "другие ему противоречат. Надёжно определить, правда это "
+                "или фейк, нельзя."
             )
 
         elif confirming_sources and not sensational:
