@@ -1,15 +1,18 @@
 import streamlit as st
 import pandas as pd
-import re
+import os
 import joblib
 
 from main_code import FactChecker
-from pymorphy3 import MorphAnalyzer
-
-morph = MorphAnalyzer()
 
 # БАГ 1: единая константа для метки фейка (по семантике site.py: 0 = ФЕЙК, 1 = ПРАВДА)
 FAKE_LABEL = 0
+
+# Пути к модели — относительно папки этого файла, чтобы работало
+# и локально, и на Streamlit Cloud независимо от рабочей директории
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "russian_fake_news_model_lemma_best.pkl")
+VECTORIZER_PATH = os.path.join(BASE_DIR, "russian_fake_news_vectorizer_lemma.pkl")
 
 
 def prepare_text(text):
@@ -22,34 +25,48 @@ def prepare_text(text):
 
 @st.cache_resource
 def load_model():
-    model_path = "russian_fake_news_model_lemma_best.pkl"
-    vectorizer_path = "russian_fake_news_vectorizer_lemma.pkl"
+    """
+    Загружает ML-модель и векторизатор.
+    Если файлов нет — возвращает (None, None), чтобы приложение не падало.
+    """
+    if not os.path.exists(MODEL_PATH) or not os.path.exists(VECTORIZER_PATH):
+        return None, None
 
-    model = joblib.load(model_path)
-    vectorizer = joblib.load(vectorizer_path)
-
+    model = joblib.load(MODEL_PATH)
+    vectorizer = joblib.load(VECTORIZER_PATH)
     return model, vectorizer
 
 
 model, vectorizer = load_model()
 
+if model is None or vectorizer is None:
+    st.warning(
+        "⚠️ ML-модель не найдена в репозитории "
+        f"({os.path.basename(MODEL_PATH)}, {os.path.basename(VECTORIZER_PATH)}). "
+        "Тест будет работать только с чистым фактчекером. "
+        "Добавьте .pkl-файлы в Git и запушьте их, чтобы включить ML-модель."
+    )
+
 
 def analyze_style(text):
     """
     Независимый вердикт ML-модели.
-    Возвращает (вердикт, уверенность в процентах).
+    Возвращает (вердикт, уверенность в процентах) или (None, 0.0),
+    если модель не загружена.
     """
+    if model is None or vectorizer is None:
+        return None, 0.0
+
     prepared = prepare_text(text)
     features = vectorizer.transform([prepared])
 
     proba = model.predict_proba(features)[0]
-    
+
     # БАГ 1: находим индекс FAKE_LABEL в model.classes_ вместо жёсткого индекса [1]
     try:
         fake_idx = list(model.classes_).index(FAKE_LABEL)
         fake_prob = proba[fake_idx]
     except (ValueError, AttributeError):
-        # Fallback: если classes_ недоступен, используем proba[0] (предполагая 0=ФЕЙК)
         fake_prob = proba[0]
 
     if fake_prob >= 0.60:
@@ -224,7 +241,8 @@ if st.button("Запустить тест"):
 
         # --- Общий вердикт ---
         if (
-            pure_fact_verdict == style_verdict
+            style_verdict is not None
+            and pure_fact_verdict == style_verdict
             and pure_fact_verdict in ("ПРАВДА", "ФЕЙК")
         ):
             final_verdict = pure_fact_verdict
