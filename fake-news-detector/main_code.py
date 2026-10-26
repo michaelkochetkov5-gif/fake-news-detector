@@ -1157,6 +1157,121 @@ _PARTICIPATION_RE = re.compile(
 )
 
 
+# HOST_BINDING: хозяйский предикат привязывается к стране по синтаксической
+# роли, а не по расстоянию в токенах.
+#
+# Расстояние не работает: в тесте "Финалиссима 2026 — ... сборными Аргентины
+# и Испании, который прошёл в Пасадине" между "Аргентины" и "прошёл" всего
+# ~5 токенов, и любое окно их "свяжет". Но "прошёл" управляет не "Аргентины",
+# а подлежащим "который" (-> "матч").
+#
+# Синтаксическая привязка = страна стоит объектом предлога "в/на", который
+# управляется хозяйским предикатом: "пройдёт В Аргентине", "прошёл В США".
+# "между сборными Аргентины" — предлог "между", не "в", привязки нет.
+_HOST_VERB_RE = re.compile(
+    r"(?<![а-яё])("
+    r"пройд[её]т|пройдут|прошл[аи]|прош[её]л|проходит|проходят|проходил\w*|"
+    r"проводит\w*|проводят\w*|проводил\w*|провед[её]н\w*|"
+    r"принима\w*|примут|примет|принял\w*"
+    r")(?![а-яё])"
+)
+
+_HOST_NOUN_RE = re.compile(
+    r"(?<![а-яё])(хозя\w+|организатор\w*|страна-хозяйка|страны-хозяйки)(?![а-яё])"
+)
+
+_HOST_PREP_RE = re.compile(r"(?<![а-яё])(в|во|на)(?![а-яё])")
+
+# Сколько токенов после предиката просматривать в поисках "в <страна>".
+HOST_WINDOW = 14
+
+# Насколько далеко может стоять страна от слова "хозяйка/организатор".
+HOST_NOUN_WINDOW = 5
+
+_LIST_JOINERS = {",", "и", "а", "также", "или"}
+
+
+def extract_hosted_countries(text):
+    """
+    Страны, к которым привязан хозяйский предикат.
+
+    Привязка считается, если:
+      1) страна стоит объектом предлога "в/на", управляемого хозяйским
+         глаголом ("пройдёт в Аргентине", "прошёл в США");
+      2) или страна стоит рядом со словом "хозяйка/организатор турнира".
+
+    Возвращает множество канонических стран (см. COUNTRY_CANON).
+    Пустое множество = "хозяйство ни к какой стране не привязано".
+    """
+    if not text:
+        return set()
+
+    low = _PARTICIPATION_RE.sub(" ", text.lower())
+    tokens = [m.group(0) for m in TOKEN_RE.finditer(low)]
+
+    if not tokens:
+        return set()
+
+    country_at = {}
+
+    for i, tok in enumerate(tokens):
+        canon = COUNTRY_CANON.get(_lemma(tok))
+        if canon:
+            country_at[i] = canon
+
+    if not country_at:
+        return set()
+
+    hosted = set()
+
+    for i, tok in enumerate(tokens):
+        if not _HOST_VERB_RE.fullmatch(tok):
+            continue
+
+        limit = min(len(tokens), i + 1 + HOST_WINDOW)
+
+        for j in range(i + 1, limit):
+            nxt = tokens[j]
+
+            if _HOST_VERB_RE.fullmatch(nxt):
+                break
+
+            if not _HOST_PREP_RE.fullmatch(nxt):
+                continue
+
+            # Собираем список стран после предлога: "в США, Канаде и Мексике"
+            k = j + 1
+            found = False
+
+            while k < len(tokens):
+                tk = tokens[k]
+
+                if k in country_at:
+                    hosted.add(country_at[k])
+                    found = True
+                    k += 1
+                elif tk in _LIST_JOINERS:
+                    k += 1
+                else:
+                    break
+
+            if found:
+                # Не break: в предложении может быть несколько списков
+                # ("ЧМ-2002 в Японии..., ЧМ-2026 в США, Канаде и Мексике").
+                # Раньше сбор останавливался на первом и терял нужный.
+                continue
+
+    for i, tok in enumerate(tokens):
+        if not _HOST_NOUN_RE.fullmatch(tok):
+            continue
+
+        for k, canon in country_at.items():
+            if abs(k - i) <= HOST_NOUN_WINDOW:
+                hosted.add(canon)
+
+    return hosted
+
+
 def has_host_predicate(text):
     """True, если в тексте есть хозяйский предикат (а не просто участие)."""
     if not text:
@@ -1164,48 +1279,62 @@ def has_host_predicate(text):
 
     low = _PARTICIPATION_RE.sub(" ", text.lower())
 
-    return bool(_HOST_RE.search(low))
+    return bool(_HOST_VERB_RE.search(low) or _HOST_NOUN_RE.search(low))
 
 
 def check_country_conflict(claim, sentence, matched_count, coverage):
     """
-    Противоречие по странам — только для действительно взаимоисключающих
-    стран (аргентина vs сша), не для совместимых (москва vs ссср).
+    Противоречие по странам — только для взаимоисключающих стран
+    (аргентина vs сша), не для совместимых (москва vs ссср).
 
-    P3: конфликт возможен ТОЛЬКО если в предложении источника есть явный
-    хозяйский предикат. Фраза "Аргентина сыграет на ЧМ-2026" — это участие:
-    она не подтверждает и не опровергает, где пройдёт турнир.
+    P3 + HOST_BINDING: противоречие возможно, только если в предложении есть
+    хозяйский предикат, ПРИВЯЗАННЫЙ к стране (страна — объект предлога "в/на"
+    при этом предикате). "Сборная Аргентины сыграет на ЧМ" и "матч ...
+    Аргентины, который прошёл в Пасадине" не дают ни подтверждения,
+    ни противоречия по странам.
 
     Условия:
-      - предложение содержит хозяйский предикат;
       - предложение релевантно: matched_count >= 3 и coverage >= 0.30;
-      - если в утверждении есть год, предложение должно содержать ТОТ ЖЕ год
-        (иначе это другое событие: ЧМ-1930 в Уругвае не опровергает ЧМ-2026);
-      - группы стран не пересекаются.
+      - хозяйский предикат привязан к стране и в утверждении, и в предложении;
+      - если в утверждении есть год, предложение содержит тот же год;
+      - группы привязанных стран не пересекаются.
     """
     if matched_count < 3 or coverage < 0.30:
         return None
 
-    if not has_host_predicate(sentence):
+    claim_hosted = _country_groups(extract_hosted_countries(claim))
+
+    if not claim_hosted:
+        return None
+
+    sentence_hosted = _country_groups(extract_hosted_countries(sentence))
+
+    if not sentence_hosted:
         return None
 
     claim_years = extract_years(claim)
-    if claim_years and not (claim_years & extract_years(sentence)):
+    sentence_years = extract_years(sentence)
+
+    if claim_years and not (claim_years & sentence_years):
         return None
 
-    claim_groups = _country_groups(extract_countries(claim))
-    sentence_groups = _country_groups(extract_countries(sentence))
-
-    if not claim_groups or not sentence_groups:
+    # Предложение, где перечислены ДРУГИЕ турниры ("ЧМ-2002 в Японии,
+    # ЧМ-2026 в США, ЧМ-2030 в Испании") — это обзор, а не утверждение
+    # о нашем событии. Страновой конфликт по нему не считаем.
+    if claim_years and (sentence_years - claim_years):
+        print(
+            f"      [country_conflict] пропуск: в предложении другие годы "
+            f"{sorted(sentence_years - claim_years)}"
+        )
         return None
 
-    if claim_groups & sentence_groups:
+    if claim_hosted & sentence_hosted:
         return None
 
     print(
-        f"      [country_conflict] хозяйский предикат; "
-        f"claim={sorted(claim_groups)} "
-        f"vs sentence={sorted(sentence_groups)} -> противоречит"
+        f"      [country_conflict] предикат привязан к стране; "
+        f"claim={sorted(claim_hosted)} "
+        f"vs sentence={sorted(sentence_hosted)} -> противоречит"
     )
 
     return "противоречит"
@@ -1222,24 +1351,35 @@ def slots_satisfied(claim, sentence):
     футболу 2026") подтверждали бы любое утверждение про ЧМ-2026,
     независимо от того, в какой стране оно пройдёт.
 
+    HOST_BINDING: если утверждение о проведении события ("пройдёт в X"),
+    в предложении нужна та же привязанная страна: страна — объект предлога
+    "в/на" при хозяйском предикате, а не просто соседнее упоминание.
+
     Порядок:
-      1) в утверждении есть страны -> нужна общая страна (по группам);
-         если утверждение о проведении события ("пройдёт в ..."), в
-         предложении нужен хозяйский предикат (участие не считается);
-      2) стран нет, но есть числа/годы -> нужно общее число/год;
-      3) слотов нет -> ограничений нет.
+      1) в утверждении есть привязанная страна -> в предложении должна быть
+         та же привязанная страна;
+      2) страны есть, но хозяйство не привязано -> нужна общая страна;
+      3) стран нет, но есть числа/годы -> нужно общее число/год;
+      4) слотов нет -> ограничений нет.
     Возвращает (ok, причина).
     """
     claim_groups = _country_groups(extract_countries(claim))
 
     if claim_groups:
+        claim_hosted = _country_groups(extract_hosted_countries(claim))
+
+        if claim_hosted:
+            sentence_hosted = _country_groups(extract_hosted_countries(sentence))
+
+            if not (claim_hosted & sentence_hosted):
+                return False, "хозяйство не привязано к стране утверждения"
+
+            return True, "страна+предикат"
+
         sentence_groups = _country_groups(extract_countries(sentence))
 
         if not (claim_groups & sentence_groups):
             return False, "нет общей страны"
-
-        if has_host_predicate(claim) and not has_host_predicate(sentence):
-            return False, "страна есть, хозяйского предиката нет (участие)"
 
         return True, "страна"
 
