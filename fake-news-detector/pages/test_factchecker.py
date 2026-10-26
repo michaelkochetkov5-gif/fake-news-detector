@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
+import time
 import joblib
 
 from main_code import FactChecker
@@ -90,6 +91,7 @@ def analyze_style(text):
         return "ПРАВДА", round((1 - fake_prob) * 100, 1)
     else:
         return "НЕИЗВЕСТНО", round(max(fake_prob, 1 - fake_prob) * 100, 1)
+
 
 fact_checker = FactChecker()
 
@@ -223,6 +225,7 @@ st.write(
 
 if st.button("Запустить тест"):
     results = []
+    start_time = time.time()
 
     fact_correct = 0
     pure_fact_correct = 0
@@ -325,6 +328,12 @@ if st.button("Запустить тест"):
 
     status.success("Тест завершён")
 
+    elapsed = time.time() - start_time
+    if elapsed < 60:
+        elapsed_str = f"{elapsed:.1f} сек"
+    else:
+        elapsed_str = f"{elapsed / 60:.1f} мин"
+
     total = len(TEST_CASES)
 
     fact_accuracy = fact_correct / total * 100
@@ -337,7 +346,7 @@ if st.button("Запустить тест"):
 
     st.subheader("📊 Итоги теста")
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
         st.metric(
@@ -362,6 +371,14 @@ if st.button("Запустить тест"):
             "Проверено примеров",
             total
         )
+
+    with col5:
+        st.metric(
+            "Время теста",
+            elapsed_str
+        )
+
+    st.caption(f"⏱ Время работы теста: {elapsed_str} (в среднем {elapsed / total:.1f} сек на кейс)")
 
     st.subheader("📋 Подробные результаты")
 
