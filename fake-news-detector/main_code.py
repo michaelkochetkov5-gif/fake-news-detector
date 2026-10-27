@@ -43,8 +43,8 @@ CACHE_TTL = 24 * 60 * 60
 
 # Версия включается в ключи кэша, чтобы старые записи не маскировали
 # изменения в логике проверки.
+# (FACTCHECKER_VERSION удалён: дублировал CACHE_VERSION и нигде не читался.)
 CACHE_VERSION = "v8-fix"
-FACTCHECKER_VERSION = "v8-fix"
 
 if os.path.exists(CACHE_FILE):
     try:
@@ -136,6 +136,9 @@ STOP_WORDS = {
     "кроме", "кроме того", "при этом", "однако", "хотя", "однако"
 }
 
+# ВНИМАНИЕ: SYNONYMS используется ТОЛЬКО в get_claim_word_groups —
+# то есть для подсветки совпавших слов в UI. На вердикт и на веса терминов
+# он НЕ влияет. Оставлен осознанно; при удалении пропадёт подсветка.
 SYNONYMS = {
     "круглый": [
         "круглый", "шарообразный", "сферический",
@@ -329,22 +332,6 @@ def clean_text(text):
     return text.strip()
 
 
-def normalize_word(word):
-    """
-    Возвращает лемму слова (а не первые 5 символов, как раньше).
-    Сигнатура сохранена для обратной совместимости.
-    """
-    if not word:
-        return ""
-
-    word = word.lower().strip()
-
-    if NUMBER_RE.match(word):
-        return word.replace(",", ".")
-
-    return _lemma(word)
-
-
 def get_base_words(text):
     """Значимые леммы текста без стоп-слов, в порядке появления."""
     lemmas = lemma_tokens(text)
@@ -483,34 +470,6 @@ def get_claim_word_groups(text):
         groups.append(list(dict.fromkeys(group)))
 
     return groups
-
-
-def has_entity_match(claim, matched_words=None):
-    """
-    Есть ли в утверждении опорная сущность: число, страна, латиница
-    или термин из ANCHOR_HINTS. Сигнатура сохранена.
-    """
-    lemmas = get_base_words(claim)
-
-    for lem in lemmas:
-        if NUMBER_RE.match(lem):
-            print(f"      [entity] число '{lem}' → True")
-            return True
-
-        if lem in COUNTRY_LEMMAS:
-            print(f"      [entity] страна '{lem}' → True")
-            return True
-
-        if re.fullmatch(r"[a-z]+", lem):
-            print(f"      [entity] латиница '{lem}' → True")
-            return True
-
-        if lem in ANCHOR_HINTS:
-            print(f"      [entity] опорный термин '{lem}' → True")
-            return True
-
-    print("      [entity] опорных сущностей нет → False")
-    return False
 
 
 def has_sensational_markers(text):
@@ -764,6 +723,13 @@ def extract_key_terms(claim, max_terms=6):
         is_latin = bool(re.fullmatch(r"[a-z]+", lem))
         is_anchor = lem in ANCHOR_HINTS
 
+        # P13-generic: служебные слова не должны попадать в поисковый запрос.
+        # "рекомендует"/"регулярную"/"всемирная" размывают запрос и уводят
+        # выдачу в сторону (для ВОЗ это давало "Паническую атаку" и COVID-19).
+        # Страны, латиница и опорные термины не фильтруются.
+        if lem in GENERIC_LEMMAS and not (is_country or is_latin or is_anchor):
+            continue
+
         if not (is_country or is_latin or is_anchor):
             if len(low) < 4 or lem in STOP_LEMMAS:
                 continue
@@ -990,7 +956,7 @@ def search_duckduckgo(claim, max_results=6):
 # Википедия требует User-Agent с контактом (политика Wikimedia API).
 # Без него сервер отвечает 403/429, а код раньше молча считал это
 # пустым поиском. Замените адрес на свой.
-WIKI_CONTACT = "michaelkochetkov5@gmail.com"
+WIKI_CONTACT = "your-email@example.com"
 WIKI_USER_AGENT = (
     "FakeNewsDetector/1.0 (educational project; contact: "
     + WIKI_CONTACT + ")"
@@ -1269,7 +1235,7 @@ def get_relevant_articles(claim, max_articles=3):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ЧИСЛА, НАПРАВЛЕНИЯ, NLI
+# ЧИСЛА И НАПРАВЛЕНИЯ (NLI удалён)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def normalize_number(text):
@@ -1547,16 +1513,6 @@ def extract_hosted_countries(text):
                 hosted.add(canon)
 
     return hosted
-
-
-def has_host_predicate(text):
-    """True, если в тексте есть хозяйский предикат (а не просто участие)."""
-    if not text:
-        return False
-
-    low = _PARTICIPATION_RE.sub(" ", text.lower())
-
-    return bool(_HOST_VERB_RE.search(low) or _HOST_NOUN_RE.search(low))
 
 
 def check_country_conflict(claim, sentence, matched_count, coverage):
