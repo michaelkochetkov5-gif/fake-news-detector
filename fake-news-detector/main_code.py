@@ -990,7 +990,7 @@ def search_duckduckgo(claim, max_results=6):
 # Википедия требует User-Agent с контактом (политика Wikimedia API).
 # Без него сервер отвечает 403/429, а код раньше молча считал это
 # пустым поиском. Замените адрес на свой.
-WIKI_CONTACT = "your-email@example.com"
+WIKI_CONTACT = "michaelkochetkov5@gmail.com"
 WIKI_USER_AGENT = (
     "FakeNewsDetector/1.0 (educational project; contact: "
     + WIKI_CONTACT + ")"
