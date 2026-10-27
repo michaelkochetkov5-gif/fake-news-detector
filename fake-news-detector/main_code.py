@@ -287,6 +287,28 @@ def lemma_tokens(text):
     return result
 
 
+# P8: леммы, которые встречаются в утверждениях на любую тему и потому
+# почти не различают темы ("широко применяется", "достаточный", "регулярный").
+# Раньше такие слова получали вес 2.0 просто за длину (>= 8 букв) и вытесняли
+# короткие содержательные: "язык", "анализ", "сон", "питание".
+GENERIC_LEMMAS = {
+    "всемирный", "регулярный", "достаточный", "сбалансированный", "важный",
+    "популярный", "широко", "широкий", "крупный", "основной", "известный",
+    "современный", "специальный", "различный", "несколько", "значительный",
+    "рекомендовать", "рекомендоваться", "применяться", "использоваться",
+    "являться", "предусматривать", "планироваться", "поддержание",
+    "развитие", "поддержка", "расширение", "обеспечение", "использование",
+    "формировать", "помогать", "уделять", "отличаться", "считаться",
+    "количество", "качество", "фактор", "способ", "образ", "система",
+    "процесс", "результат", "работа", "направление", "средство", "орган",
+    "новый", "целый", "общий", "первый", "второй", "число"
+}
+
+# P8: сколько доли суммарного веса набрать в отборе терминов.
+TERM_WEIGHT_SHARE = 0.60
+MIN_TERMS = 4
+MAX_TERMS = 24
+
 STOP_LEMMAS = {_lemma(w) for w in STOP_WORDS}
 STOP_LEMMAS.update({
     "свой", "весь", "который", "этот", "мочь", "быть", "это",
@@ -346,7 +368,18 @@ def get_base_words(text):
 
 
 def _term_weight(lemma):
-    """Вес термина: числа и латиница — сильнее всего, затем длина."""
+    """
+    P8: вес по информативности, а не по длине слова.
+
+    Числа, страны, латиница и опорные термины — 3.0 (однозначные сущности).
+    Слова из GENERIC_LEMMAS — 1.0: они есть почти в любом утверждении и
+    только размывают coverage.
+    Остальные содержательные слова — 2.0. Именно они и должны доминировать:
+    "язык", "анализ", "сон", "питание".
+
+    Длина больше не учитывается: короткое специфичное слово важнее длинного
+    общего.
+    """
     if NUMBER_RE.match(lemma):
         return 3.0
 
@@ -359,13 +392,10 @@ def _term_weight(lemma):
     if lemma in ANCHOR_HINTS:
         return 3.0
 
-    if len(lemma) >= 8:
-        return 2.0
+    if lemma in GENERIC_LEMMAS:
+        return 1.0
 
-    if len(lemma) >= 6:
-        return 1.6
-
-    return 1.0
+    return 2.0
 
 
 def claim_key_terms(text):
@@ -384,7 +414,55 @@ def claim_key_terms(text):
         else:
             weights[lem] = w
 
-    return sorted(weights.items(), key=lambda kv: (-kv[1], -len(kv[0])))
+    return sorted(weights.items(), key=lambda kv: -kv[1])
+
+
+def select_terms(key_terms):
+    """
+    P8: отбор терминов по доле веса вместо жёсткого top-10.
+
+    Идём по терминам от тяжёлых к лёгким, пока не набрали TERM_WEIGHT_SHARE
+    от суммарного веса. Порог MIN_TERMS/MAX_TERMS не даёт выродиться
+    в один термин на коротком утверждении и в полсотни на длинном.
+
+    Раньше [:10] отрезало ровно десять по порядку, и на длинном утверждении
+    лёгкие, но содержательные слова ("анализ", "сон") отбрасывались, хотя
+    их вес был тем же, что у оставшихся.
+    """
+    if not key_terms:
+        return []
+
+    total = sum(w for _, w in key_terms) or 1.0
+    target = total * TERM_WEIGHT_SHARE
+
+    selected = []
+    accumulated = 0.0
+
+    last_weight = None
+
+    for lemma, weight in key_terms:
+        selected.append((lemma, weight))
+        accumulated += weight
+        last_weight = weight
+
+        if len(selected) >= MAX_TERMS:
+            break
+
+        if accumulated >= target and len(selected) >= MIN_TERMS:
+            break
+
+    # P8-fix: порог режет по весу, а не по «важности». Если на границе
+    # остались термины с ТЕМ ЖЕ весом, что у последнего отобранного, их
+    # нельзя отбрасывать: иначе у Python пропадали "язык"/"анализ" (вес 2.0
+    # как у "программирование"), а у ЧМ-Аргентины — год 2026 (вес 3.0).
+    if last_weight is not None:
+        for lemma, weight in key_terms[len(selected):]:
+            if weight < last_weight or len(selected) >= MAX_TERMS:
+                break
+
+            selected.append((lemma, weight))
+
+    return selected
 
 
 def get_claim_word_groups(text):
@@ -617,6 +695,30 @@ def extract_numbers(text):
 # ПОИСК
 # ─────────────────────────────────────────────────────────────────────────────
 
+# P13: единицы измерения, которые имеют смысл приклеить к числу
+# ("150 минут" лучше, чем просто "150").
+UNIT_WORDS = {
+    "процент", "процента", "процентов", "минута", "минут", "минуты",
+    "час", "часа", "часов", "день", "дня", "дней", "неделя", "недели",
+    "недель", "месяц", "месяца", "месяцев", "год", "года", "лет",
+    "рубль", "рубля", "рублей", "доллар", "доллара", "долларов",
+    "человек", "человека", "тысяча", "тысяч", "миллион", "миллиона",
+    "миллионов", "миллиард", "миллиарда", "миллиардов", "сборная",
+    "сборный", "сборная", "страна", "команда",
+    "команды", "команд", "матч", "матча", "матчей", "метр", "метра",
+    "метров", "километр", "километра", "километров", "гол", "гола",
+    "голов", "очко", "очка", "очков", "место", "места", "мест",
+}
+
+
+def _number_with_unit(number, following):
+    """Возвращает '150 минут', если сразу за числом стоит единица."""
+    if following and _lemma(following) in UNIT_WORDS:
+        return number + " " + following
+
+    return number
+
+
 def extract_key_terms(claim, max_terms=6):
     """
     Запрос из 3-6 ключевых слов в исходной форме (нижний регистр).
@@ -627,7 +729,7 @@ def extract_key_terms(claim, max_terms=6):
     а "США" выпадало целиком. Теперь класс включает А-ЯЁ, а страны и
     аббревиатуры короче 4 букв (США, ВОЗ) не отбрасываются.
     """
-    raw_words = re.findall(r"[а-яёА-ЯЁa-zA-Z]+|\d{4}", claim)
+    raw_words = re.findall(r"[а-яёА-ЯЁa-zA-Z]+|\d+", claim)
 
     numbers = []
     priority = []
@@ -636,16 +738,24 @@ def extract_key_terms(claim, max_terms=6):
 
     seen = set()
 
-    for raw in raw_words:
+    for index, raw in enumerate(raw_words):
         low = raw.lower()
 
         if low in seen:
             continue
 
         if low.isdigit():
-            if len(low) == 4:
-                numbers.append(low)
-                seen.add(low)
+            # P13: раньше здесь был `if len(low) == 4`, и все прочие числа
+            # ("150", "48", "18") молча выпадали из запроса.
+            following = raw_words[index + 1].lower() if index + 1 < len(raw_words) else ""
+            unit_value = _number_with_unit(low, following)
+
+            # Число из 3+ цифр или с единицей измерения — значимо.
+            # 1-2 значные без единицы почти всегда шум ("в 2 раза").
+            if len(low) >= 3 or (following and _lemma(following) in UNIT_WORDS):
+                numbers.append(unit_value)
+                seen.add(unit_value)
+
             continue
 
         lem = _lemma(low)
@@ -678,6 +788,78 @@ def extract_key_terms(claim, max_terms=6):
     return query
 
 
+# Виды спорта для уточнения странового запроса. Без них "чемпионат мира
+# 2026" смешивает футбол с борьбой, дзюдо и художественной гимнастикой.
+SPORT_WORDS = [
+    "футбол", "хоккей", "баскетбол", "волейбол", "теннис", "борьб",
+    "дзюдо", "плавание", "бокс", "шахмат", "биатлон",
+    "гимнастик", "регби", "крикет", "гандбол",
+]
+
+
+def make_host_query(claim):
+    """
+    Третий запрос — страновое уточнение ("чемпионат мира 2026 страны-хозяйки").
+
+    Зачем: первые два запроса собираются из терминов самого утверждения.
+    Если утверждение лжёт о стране ("ЧМ-2026 пройдёт в Аргентине"), оба
+    запроса тянут тексты про Аргентину, и страница с настоящими хозяевами
+    в выдачу не попадает — country_conflict молчит, вердикт НЕИЗВЕСТНО.
+
+    Возвращает None, если в утверждении нет привязанной страны при
+    хозяйском предикате: для остальных тем лишний запрос бесполезен и
+    только жжёт лимиты.
+    """
+    if not claim:
+        return None
+
+    try:
+        if not extract_hosted_countries(claim):
+            return None
+    except Exception:
+        return None
+
+    low = claim.lower()
+
+    event = None
+
+    for match in _HOST_TOURNAMENT_RE.finditer(low):
+        event = match.group(0)
+        break
+
+    if not event:
+        event = "турнир"
+
+    parts = [event]
+
+    # Уточнение "мира" отделяет чемпионат мира от прочих чемпионатов.
+    if re.search(r"(?<![а-яё])мир[ау]?(?![а-яё])", low):
+        parts.append("мира")
+
+    # Вид спорта обязателен: без него "чемпионат мира 2026" выдаёт борьбу
+    # и дзюдо, а нужная страница с хозяевами уходит за пределы топа.
+    sport = None
+
+    # Основа, а не целое слово: в тексте "футболу"/"футболе", и проверка
+    # на точное совпадение слова не срабатывала.
+    for candidate in SPORT_WORDS:
+        if re.search(r"(?<![а-яё])" + candidate + r"[а-яё]{0,3}(?![а-яё])", low):
+            sport = candidate
+            break
+
+    if sport:
+        parts.append(sport)
+
+    years = sorted(extract_years(claim))
+
+    if years:
+        parts.append(years[0])
+
+    parts.append("страны-хозяйки")
+
+    return " ".join(parts)
+
+
 def make_search_queries(claim):
     """
     Два запроса:
@@ -698,8 +880,16 @@ def make_search_queries(claim):
     if query2 and query2 != query1:
         queries.append(query2)
 
+    # Третий запрос — только для утверждений о проведении события.
+    host_query = make_host_query(claim)
+
+    if host_query:
+        queries.append(host_query)
+
     if not queries:
         queries = [claim[:60]]
+
+    queries = list(dict.fromkeys(queries))
 
     print(f"   [queries] {queries}")
 
@@ -904,7 +1094,14 @@ def search_wikipedia_api(claim, max_results=6):
     lemmas = get_base_words(claim)
     query2 = " ".join(lemmas[:4])
 
-    queries = list(dict.fromkeys([q for q in (query1, query2) if q]))
+    queries = [q for q in (query1, query2) if q]
+
+    host_query = make_host_query(claim)
+
+    if host_query:
+        queries.append(host_query)
+
+    queries = list(dict.fromkeys(queries))
 
     if not queries:
         queries = [claim[:60]]
@@ -960,7 +1157,8 @@ def search_wikipedia_api(claim, max_results=6):
                     "summary": snippet,
                     "body": body,
                     "url": page_url,
-                    "source": "Wikipedia"
+                    "source": "Wikipedia",
+                    "from_host": bool(host_query) and query == host_query
                 })
 
             print(f"   [Wiki] '{query[:50]}': +{len(results) - before}")
@@ -978,13 +1176,25 @@ def search_wikipedia_api(claim, max_results=6):
             seen_urls.add(result["url"])
             unique.append(result)
 
-    print(f"   [Wiki] итого {len(unique)}")
+    # Результаты странового запроса идут первыми: иначе страница с
+    # настоящими хозяевами отрезается порогом max_results.
+    host_first = [r for r in unique if r.get("from_host")]
+    others = [r for r in unique if not r.get("from_host")]
 
-    if unique:
-        _cache_set(search_cache, cache_key, unique[:max_results])
+    ordered = host_first + others
+
+    for item in ordered:
+        item.pop("from_host", None)
+
+    print(f"   [Wiki] итого {len(ordered)}")
+
+    if ordered:
+        _cache_set(search_cache, cache_key, ordered[:max_results])
         save_cache()
 
-    return unique[:max_results]
+    # БАГ: раньше возвращался unique[:max_results], поэтому приоритет хозяев
+    # уходил только в кэш, а вызывающий код получал старый порядок.
+    return ordered[:max_results]  # HOST_QUERY_DONE
 
 
 RSS_FEEDS = [
@@ -1007,7 +1217,7 @@ def get_relevant_articles(claim, max_articles=3):
             print(f"   [RSS] кэш: {len(articles)}")
             return copy.deepcopy(articles)
 
-    key_terms = dict(claim_key_terms(claim)[:10])
+    key_terms = dict(select_terms(claim_key_terms(claim)))
     total_weight = sum(key_terms.values()) or 1.0
 
     articles = []
@@ -1558,7 +1768,7 @@ def find_best_sentences(claim, text, max_sentences=3):
     if not key_terms:
         return []
 
-    weights = dict(key_terms[:10])
+    weights = dict(select_terms(key_terms))
     total_weight = sum(weights.values()) or 1.0
 
     # CLAUSE_SPLIT_FIX: режем текст источника по заголовкам Википедии
@@ -1729,7 +1939,7 @@ def estimate_support(claim, sources):
             elif match["status"] == "противоречит":
                 negative += 1.0
 
-    denom = max(len(key_terms[:10]), 1)
+    denom = max(len(select_terms(key_terms)), 1)
     support_score = max(0.0, min((positive - negative) / denom, 1.0))
 
     evidence.sort(key=lambda item: item["score"], reverse=True)
@@ -1826,7 +2036,7 @@ class FactChecker:
         print(f"   [claim] {text[:90]}")
 
         key_terms = claim_key_terms(text)
-        print(f"   [lemms] {[t for t, _ in key_terms[:10]]}")
+        print(f"   [lemms] {[t for t, _ in select_terms(key_terms)]}")
 
         duckduckgo_results = search_duckduckgo(text)
         wikipedia_results = search_wikipedia_api(text)
@@ -1918,10 +2128,11 @@ class FactChecker:
             )
 
             source_lemmas = set(lemma_tokens(source_text))
-            matched = [lem for lem, _ in key_terms[:10] if lem in source_lemmas]
+            selected_terms = select_terms(key_terms)
+            matched = [lem for lem, _ in selected_terms if lem in source_lemmas]
             coverage = (
-                sum(w for lem, w in key_terms[:10] if lem in source_lemmas)
-                / (sum(w for _, w in key_terms[:10]) or 1.0)
+                sum(w for lem, w in selected_terms if lem in source_lemmas)
+                / (sum(w for _, w in selected_terms) or 1.0)
             )
 
             if len(matched) >= 2 and coverage >= 0.20:
