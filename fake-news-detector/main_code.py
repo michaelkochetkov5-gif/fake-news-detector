@@ -5,6 +5,8 @@ import re
 import json
 import os
 import time
+import copy
+import hashlib
 from functools import lru_cache
 from bs4 import BeautifulSoup
 
@@ -27,10 +29,17 @@ except Exception:
     _MORPH = None
     MORPH_AVAILABLE = False
 
+# Правка №8: отдельный файл. Раньше site.py (cache.json, md5-ключи) и
+# main_code (search_cache/news_cache) писали ОДИН файл, и save_cache() из
+# main_code затирал записи site.py целиком.
 CACHE_FILE = os.path.join(
     os.path.dirname(__file__),
-    "cache.json"
+    "factchecker_cache.json"
 )
+
+# Сколько живёт запись поиска. Тела статей по 12 000 символов иначе
+# копятся в файле бесконечно и маскируют изменения выдачи.
+CACHE_TTL = 24 * 60 * 60
 
 # Версия включается в ключи кэша, чтобы старые записи не маскировали
 # изменения в логике проверки.
@@ -67,11 +76,38 @@ def save_cache():
 
 
 def get_cache_key(text):
-    return CACHE_VERSION + "_" + re.sub(
-        r"[^a-zа-яё0-9]+",
-        "_",
-        text.lower()
-    ).strip("_")[:180]
+    """Полный SHA-1 нормализованного текста.
+
+    Правка №8: раньше ключ обрезался до 180 символов, поэтому два разных
+    утверждения с общим длинным префиксом давали один ключ (коллизия).
+    """
+    normalized = re.sub(r"[^a-zа-яё0-9]+", " ", text.lower()).strip()
+
+    return CACHE_VERSION + "_" + hashlib.sha1(
+        normalized.encode("utf-8")
+    ).hexdigest()
+
+
+def _cache_get(store, key):
+    """Возвращает копию записи кэша или None, если её нет / истёк TTL."""
+    if key not in store:
+        return None
+
+    entry = store[key]
+
+    # Старый формат: просто список. TTL к нему не применяем.
+    if not isinstance(entry, dict) or "results" not in entry:
+        return copy.deepcopy(entry)
+
+    if time.time() - entry.get("time", 0) > CACHE_TTL:
+        store.pop(key, None)
+        return None
+
+    return copy.deepcopy(entry["results"])
+
+
+def _cache_set(store, key, results):
+    store[key] = {"time": time.time(), "results": copy.deepcopy(results)}
 
 
 STOP_WORDS = {
@@ -210,36 +246,6 @@ ANCHOR_HINTS = {
     "правительство", "министерство", "президент", "госдума",
     "центробанк", "банк", "экономика", "интернет", "здравоохранение"
 }
-
-NLI_LOAD_ERROR = None
-
-
-@st.cache_resource
-def load_nli_model():
-    global NLI_LOAD_ERROR
-
-    if not TRANSFORMERS_AVAILABLE:
-        NLI_LOAD_ERROR = "transformers не установлен"
-        return None
-
-    try:
-        model = pipeline(
-            "text-classification",
-            model="cointegrated/rubert-base-cased-nli-threeway",
-            truncation=True
-        )
-
-        NLI_LOAD_ERROR = None
-        return model
-
-    except Exception as e:
-        NLI_LOAD_ERROR = str(e)
-        print("NLI LOAD ERROR:", e)
-        return None
-
-
-nli_model = None
-
 
 @lru_cache(maxsize=50000)
 def _lemma(word):
@@ -736,8 +742,9 @@ def get_page_text(url, max_length=12000):
 def search_duckduckgo(claim, max_results=6):
     cache_key = "ddg_" + get_cache_key(claim)
 
-    if cache_key in search_cache:
-        cached = search_cache[cache_key]
+    cached = _cache_get(search_cache, cache_key)
+
+    if cached is not None:
         print(f"   [DDG] кэш: {len(cached)}")
         return cached
 
@@ -784,7 +791,7 @@ def search_duckduckgo(claim, max_results=6):
     print(f"   [DDG] итого {len(results)}")
 
     if results:
-        search_cache[cache_key] = results[:max_results]
+        _cache_set(search_cache, cache_key, results[:max_results])
         save_cache()
 
     return results[:max_results]
@@ -793,7 +800,7 @@ def search_duckduckgo(claim, max_results=6):
 # Википедия требует User-Agent с контактом (политика Wikimedia API).
 # Без него сервер отвечает 403/429, а код раньше молча считал это
 # пустым поиском. Замените адрес на свой.
-WIKI_CONTACT = "michaelkochetkov5@gmail.com"
+WIKI_CONTACT = "your-email@example.com"
 WIKI_USER_AGENT = (
     "FakeNewsDetector/1.0 (educational project; contact: "
     + WIKI_CONTACT + ")"
@@ -884,8 +891,9 @@ def get_wikipedia_full_text(title):
 def search_wikipedia_api(claim, max_results=6):
     cache_key = "wiki_" + get_cache_key(claim)
 
-    if cache_key in search_cache:
-        cached = search_cache[cache_key]
+    cached = _cache_get(search_cache, cache_key)
+
+    if cached is not None:
         print(f"   [Wiki] кэш: {len(cached)}")
         return cached
 
@@ -973,7 +981,7 @@ def search_wikipedia_api(claim, max_results=6):
     print(f"   [Wiki] итого {len(unique)}")
 
     if unique:
-        search_cache[cache_key] = unique[:max_results]
+        _cache_set(search_cache, cache_key, unique[:max_results])
         save_cache()
 
     return unique[:max_results]
@@ -997,7 +1005,7 @@ def get_relevant_articles(claim, max_articles=3):
         if current_time - cached.get("time", 0) < 3600:
             articles = cached.get("articles", [])
             print(f"   [RSS] кэш: {len(articles)}")
-            return articles
+            return copy.deepcopy(articles)
 
     key_terms = dict(claim_key_terms(claim)[:10])
     total_weight = sum(key_terms.values()) or 1.0
@@ -1188,6 +1196,25 @@ HOST_WINDOW = 14
 # Насколько далеко может стоять страна от слова "хозяйка/организатор".
 HOST_NOUN_WINDOW = 5
 
+# Правка №1: «организатор/хозяйка» привязывает страну к хозяйству только если
+# рядом есть турнирное слово. Иначе «организатор товарищеского матча» рядом с
+# «Аргентиной» давал привязку и ложный ФЕЙК на правдивом утверждении.
+_HOST_TOURNAMENT_RE = re.compile(
+    r"(?<![а-яё])("
+    r"турнир\w*|чемпионат\w*|мундиаль\w*|первенств\w*|кубок|кубка|кубке"
+    r")(?![а-яё])"
+)
+
+# Насколько близко к «организатор/хозяйка» должно стоять турнирное слово.
+HOST_NOUN_CONTEXT = 2
+
+# Правка №4: эти глаголы управляют прямым объектом («Матчи примут США»),
+# поэтому привязка по предлогу «в/на» для них не единственный вариант.
+_HOST_DIRECT_VERB_RE = re.compile(
+    r"(?<![а-яё])(примут|примет|приму|примешь|"
+    r"принимают|принимает|принимал\w*|принял\w*|принять)(?![а-яё])"
+)
+
 _LIST_JOINERS = {",", "и", "а", "также", "или"}
 
 
@@ -1261,8 +1288,48 @@ def extract_hosted_countries(text):
                 # Раньше сбор останавливался на первом и терял нужный.
                 continue
 
+    def collect_country_list(start):
+        """Собирает список стран начиная с индекса start. Возвращает (страны, найдено)."""
+        found_countries = set()
+        k = start
+
+        while k < len(tokens):
+            if k in country_at:
+                found_countries.add(country_at[k])
+                k += 1
+            elif tokens[k] in _LIST_JOINERS:
+                k += 1
+            else:
+                break
+
+        return found_countries
+
+    # Правка №4: прямой объект при глаголах «примут/примет/принимают».
+    # «примут участие» уже вырезано _PARTICIPATION_RE выше, поэтому здесь
+    # остаются только хозяйственные конструкции.
+    for i, tok in enumerate(tokens):
+        if not _HOST_DIRECT_VERB_RE.fullmatch(tok):
+            continue
+
+        if i + 1 >= len(tokens) or (i + 1) not in country_at:
+            continue
+
+        hosted.update(collect_country_list(i + 1))
+
+    # Правка №1: «организатор/хозяйка» + турнирное слово рядом.
     for i, tok in enumerate(tokens):
         if not _HOST_NOUN_RE.fullmatch(tok):
+            continue
+
+        context_start = max(0, i - HOST_NOUN_CONTEXT)
+        context_end = min(len(tokens), i + HOST_NOUN_CONTEXT + 1)
+
+        has_tournament = any(
+            _HOST_TOURNAMENT_RE.fullmatch(tokens[c])
+            for c in range(context_start, context_end)
+        )
+
+        if not has_tournament:
             continue
 
         for k, canon in country_at.items():
@@ -1394,35 +1461,6 @@ def slots_satisfied(claim, sentence):
     return True, "слотов нет"
 
 
-def check_sentence_with_nli(claim, sentence):
-    if nli_model is None:
-        return None, 0.0
-
-    try:
-        result = nli_model(
-            {"text": sentence, "text_pair": claim},
-            truncation=True
-        )
-
-        if isinstance(result, list):
-            result = result[0]
-
-        label = result.get("label", "").lower()
-        score = float(result.get("score", 0))
-
-        if "entail" in label and score >= 0.70:
-            return "подтверждает", score
-
-        if "contradict" in label and score >= 0.80:
-            return "противоречит", score
-
-        return "нейтрально", score
-
-    except Exception as e:
-        print("NLI ERROR:", e)
-        return None, 0.0
-
-
 def _has_contradiction_phrase(sentence_lower):
     """Маркер противоречия с границами слов, не по подстроке."""
     for phrase in CONTRADICTION_WORDS:
@@ -1471,6 +1509,33 @@ CONFIRM_THRESHOLD = 0.60
 PARTIAL_THRESHOLD = 0.30
 
 
+def split_source_clauses(text):
+    """
+    Единый сплиттер текста источника: по заголовкам Википедии (==, ===),
+    по границам предложений (. ! ? ; :) и по тире с пробелами.
+
+    Используется и в find_best_sentences, и в сборке details для UI,
+    чтобы пользователь видел ровно ту клаузу, которую оценивала система.
+
+    Почему режем по ":" и по тире: иначе обломки вида
+    "Финалиссима 2026 — ... прошёл в Пасадине" склеиваются, и страна с
+    предикатом из разных фраз дают ложное подтверждение.
+    """
+    if not text:
+        return []
+
+    clauses = []
+
+    for chunk in re.split(r"=+", text):
+        for part in re.split(r"(?<=[.!?;:])\s+|\s[—–]\s", chunk):
+            part = part.strip()
+
+            if part:
+                clauses.append(part)
+
+    return clauses
+
+
 def find_best_sentences(claim, text, max_sentences=3):
     """
     Ищет предложения источника, релевантные утверждению.
@@ -1502,11 +1567,7 @@ def find_best_sentences(claim, text, max_sentences=3):
     # клаузы, иначе обломок вида "Финал 2026 — ... США, прошёл в ..." даёт
     # ложное подтверждение, потому что страны и предикат попали в одну
     # строку, но из разных фраз.
-    sentences = []
-    for chunk in re.split(r"=+", text):
-        sentences.extend(
-            re.split(r"(?<=[.!?;:])\s+|\s[—–]\s", chunk)
-        )
+    sentences = split_source_clauses(text)
 
     # Годы утверждения и годы заголовка источника (первый фрагмент текста —
     # это title, так его собирает estimate_support).
@@ -1547,10 +1608,6 @@ def find_best_sentences(claim, text, max_sentences=3):
         ):
             year_check = "противоречит"
 
-        nli_status, nli_score = (None, 0.0)
-        if matched_count >= 3:
-            nli_status, nli_score = check_sentence_with_nli(claim, sentence_clean)
-
         # v8: маркер противоречия засчитываем только в действительно
         # релевантном предложении (>= 3 терминов и coverage >= 0.30).
         # Иначе фраза "миф" из статьи "Мифы о вакцинации" рушит правду.
@@ -1577,8 +1634,6 @@ def find_best_sentences(claim, text, max_sentences=3):
 
         if numeric_check == "противоречит":
             status = "противоречит"
-        elif nli_status == "противоречит":
-            status = "противоречит"
         elif country_check == "противоречит":
             status = "противоречит"
         elif contradiction_phrase:
@@ -1586,8 +1641,6 @@ def find_best_sentences(claim, text, max_sentences=3):
         elif block_confirm:
             status = "связан с темой утверждения"
         elif numeric_check == "подтверждает":
-            status = "подтверждает"
-        elif nli_status == "подтверждает":
             status = "подтверждает"
         elif coverage >= CONFIRM_THRESHOLD and matched_count >= 3:
             status = "подтверждает"
@@ -1614,9 +1667,7 @@ def find_best_sentences(claim, text, max_sentences=3):
             "matched_words": matched,
             "numeric_check": numeric_check,
             "year_check": year_check,
-            "country_check": country_check,
-            "nli_status": nli_status,
-            "nli_score": nli_score
+            "country_check": country_check
         })
 
     matches.sort(
@@ -1891,8 +1942,7 @@ class FactChecker:
             for item in relevant_sources[:6]:
                 source = item["source"]
 
-                sentences = re.split(
-                    r"(?<=[.!?])\s+",
+                sentences = split_source_clauses(
                     (source.get("summary", "") + " " + source.get("body", "")).strip()
                 )
 
