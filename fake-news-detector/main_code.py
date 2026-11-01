@@ -241,6 +241,10 @@ COUNTRY_LEMMAS = {
     "австралия", "новая", "корея", "казахстан", "беларусь"
 }
 
+
+
+
+
 # Опорные сущности: если лемма из этого набора совпала — совпадение весомее.
 ANCHOR_HINTS = {
     "python", "javascript", "java", "c++", "metlife",
@@ -956,14 +960,21 @@ def search_duckduckgo(claim, max_results=6):
 # Википедия требует User-Agent с контактом (политика Wikimedia API).
 # Без него сервер отвечает 403/429, а код раньше молча считал это
 # пустым поиском. Замените адрес на свой.
-WIKI_CONTACT = "michaelkochetkov5@gmail.com"
+WIKI_CONTACT = "your-email@example.com"
 WIKI_USER_AGENT = (
     "FakeNewsDetector/1.0 (educational project; contact: "
     + WIKI_CONTACT + ")"
 )
 
 
-def _wiki_get(params, timeout=15, max_retries=1):
+# Паузы, чтобы не утроить нагрузку на Wikipedia при 2-3 запросах на claim.
+# 429 на страновом (последнем) запросе означал, что страница хозяев
+# (ЧМ-Аргентина) не доходила до country_conflict.
+WIKI_QUERY_PAUSE = 2.5     # между поисковыми запросами внутри claim
+WIKI_PAGE_PAUSE = 1.5      # между полнотекстовыми запросами страниц
+
+
+def _wiki_get(params, timeout=15, max_retries=2):
     """
     GET к ru.wikipedia API с логированием статуса.
     При 429/503 повторяет запрос, уважая Retry-After (не дольше 5 с).
@@ -1000,8 +1011,10 @@ def _wiki_get(params, timeout=15, max_retries=1):
 
         try:
             # Retry-After от Википедии часто слишком мал (0.1 с) — повтор
-            # сразу снова падает в 429. Ждём не меньше 2 с, не больше 5 с.
-            wait = min(max(float(retry_after), 2.0), 5.0)
+            # сразу снова падает в 429. Реальный лимит держится минуты, но
+            # ждать полную минуту на каждый запрос сделало бы тест слишком
+            # долгим. Компромисс: не меньше 2 с, не больше 12 с.
+            wait = min(max(float(retry_after), 2.0), 12.0)
         except ValueError:
             wait = 2.0
 
@@ -1127,8 +1140,13 @@ def search_wikipedia_api(claim, max_results=6):
                     "from_host": bool(host_query) and query == host_query
                 })
 
+                # Пауза между полнотекстовыми запросами: их до 4 на один
+                # поисковый запрос, и без паузы они съедали лимит раньше,
+                # чем очередь доходила до странового запроса.
+                time.sleep(WIKI_PAGE_PAUSE)
+
             print(f"   [Wiki] '{query[:50]}': +{len(results) - before}")
-            time.sleep(0.3)
+            time.sleep(WIKI_QUERY_PAUSE)
 
         except Exception as e:
             print(f"   [Wiki] ошибка: {e}")
@@ -1239,15 +1257,56 @@ def get_relevant_articles(claim, max_articles=3):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def normalize_number(text):
+    """
+    Числа из текста. Годы (4 цифры) исключены: совпавший год — это совпадение
+    периода, а не общего числа. Иначе "Рост экспорта в 2026" и "Снижение
+    импорта в 2026" считались бы противоречием только из-за года.
+    """
     text = text.lower().replace(",", ".")
-    return re.findall(r"\d+(?:\.\d+)?", text)
+    numbers = re.findall(r"\d+(?:\.\d+)?", text)
+
+    # P6-narrow: год не является "общим числом" для проверки направления.
+    return [n for n in numbers if not (len(n.split(".")[0]) == 4 and n.isdigit())]
+
+
+# P6-topic-v2: добавлены глагольные формы прошедшего времени. Раньше
+# "Выручка выросла на 15%" не распознавалось вообще (слова "выросла" в
+# словаре не было), и настоящее противоречие по числу пропускалось.
+# Списки приводятся к множествам: _has_word сравнивает токены целиком.
+GROWTH_WORDS = set(GROWTH_WORDS) | {
+    "вырос", "выросла", "выросло", "выросли",
+    "растёт", "растет", "растут", "рос", "росла", "росли",
+    "увеличился", "увеличилась", "увеличилось", "увеличились",
+    "повысился", "повысилась", "повысилось", "повысились",
+    "поднялся", "поднялась", "поднялось", "поднялись",
+}
+
+DECLINE_WORDS = set(DECLINE_WORDS) | {
+    "снизился", "снизилась", "снизилось", "снизились",
+    "упал", "упала", "упало", "упали",
+    "сократился", "сократилась", "сократилось", "сократились",
+    "уменьшился", "уменьшилась", "уменьшилось", "уменьшились",
+    "падает", "падают", "снижается", "снижаются",
+}
+
+
+def _has_word(text, words):
+    """
+    P6-topic-v2: точное совпадение токена со словарём форм.
+
+    Поиск подстрокой давал "рост" внутри "Ростов". Поиск по границе с
+    окончаниями до 4 букв тоже не помогал ("Ростов" = "рост" + "ов"),
+    поэтому сравниваем токен целиком. Формы слов перечислены в словарях.
+    """
+    tokens = set(re.findall(r"[а-яёa-z]+", text.lower()))
+    return bool(tokens & words)
 
 
 def get_direction(text):
     text_lower = text.lower()
 
-    has_growth = any(w in text_lower for w in GROWTH_WORDS)
-    has_decline = any(w in text_lower for w in DECLINE_WORDS)
+    has_growth = _has_word(text_lower, GROWTH_WORDS)
+    has_decline = _has_word(text_lower, DECLINE_WORDS)
 
     if has_growth and not has_decline:
         return "рост"
@@ -1391,6 +1450,15 @@ _HOST_DIRECT_VERB_RE = re.compile(
     r"принимают|принимает|принимал\w*|принял\w*|принять)(?![а-яё])"
 )
 
+# P6-paren: "(все — Мексика)", "(оба — Канада)", "(в том числе США)".
+# Страна внутри такой скобки — хозяин всего списка перед ней.
+_PAREN_HOST_RE = re.compile(
+    r"\(\s*(?:все|оба|обе|в том числе|включая)"
+    r"(?:\s*[—–-]\s*|\s+|\s+это\s+)"
+    r"([а-яёa-z]+)",
+    re.IGNORECASE
+)
+
 _LIST_JOINERS = {",", "и", "а", "также", "или"}
 
 
@@ -1410,6 +1478,18 @@ def extract_hosted_countries(text):
         return set()
 
     low = _PARTICIPATION_RE.sub(" ", text.lower())
+
+    # P6-paren: "(все — Мексика)", "(оба — Канада)", "(в том числе США)"
+    # относят страну ко всему списку перед скобкой. Предлога "в/на" здесь нет,
+    # поэтому обычная привязка не срабатывает — добавляем явно.
+    paren_hosted = set()
+
+    for match in _PAREN_HOST_RE.finditer(low):
+        canon = COUNTRY_CANON.get(_lemma(match.group(1)))
+
+        if canon:
+            paren_hosted.add(canon)
+
     tokens = [m.group(0) for m in TOKEN_RE.finditer(low)]
 
     if not tokens:
@@ -1512,7 +1592,7 @@ def extract_hosted_countries(text):
             if abs(k - i) <= HOST_NOUN_WINDOW:
                 hosted.add(canon)
 
-    return hosted
+    return hosted | paren_hosted
 
 
 def check_country_conflict(claim, sentence, matched_count, coverage):
@@ -1675,6 +1755,125 @@ CONFIRM_THRESHOLD = 0.60
 PARTIAL_THRESHOLD = 0.30
 
 
+# Основы видов спорта для сверки темы claim и заголовка источника.
+# Отдельно от SPORT_WORDS (он используется только в make_host_query).
+# Слова, которые есть в любом утверждении о событии и потому не помогают
+# отличить один турнир от другого.
+EVENT_VERB_LEMMAS = {
+    "пройти", "проходить", "проходить", "состояться", "проводить", "провести",
+    "проводиться", "принять", "принимать", "являться", "стать", "быть",
+}
+
+# Доля значимых терминов claim, которая должна найтись в заголовке источника.
+# Именно 1.0: при 0.66 «Чемпионат мира по хоккею 2026» проходил проверку для
+# утверждения о футболе (совпадали чемпионат + мир + 2026, отличался только
+# вид спорта) и давал ложный ФЕЙК на правдивом утверждении.
+TOPIC_TITLE_COVERAGE = 1.0
+
+
+def _topic_terms(text):
+    """
+    Значимые термины утверждения: без стран, без служебных слов и без
+    глаголов события. Для "Чемпионат мира по футболу 2026 года пройдёт
+    в Аргентине" это {чемпионат, мир, футбол, 2026}.
+    """
+    terms = set()
+
+    for token in lemma_tokens(text):
+        if NUMBER_RE.match(token):
+            terms.add(token)
+            continue
+
+        lem = _lemma(token)
+
+        if lem in COUNTRY_CANON or lem in COUNTRY_LEMMAS:
+            continue
+
+        if lem in GENERIC_LEMMAS or lem in STOP_LEMMAS:
+            continue
+
+        if lem in EVENT_VERB_LEMMAS:
+            continue
+
+        if len(lem) >= 3:
+            terms.add(lem)
+
+    return terms
+
+
+def topic_confirmed(claim, source_title):
+    """
+    P6-topic: тема источника подтверждена заголовком.
+
+    Зачем: без этого противоречие по стране срабатывало на любой странице
+    "Чемпионат мира ... 2026" — включая хоккей, дзюдо и баскетбол того же
+    года, что давало ложный ФЕЙК на правдивом утверждении.
+
+    Условие: значимые термины claim (не страны, не служебные слова)
+    присутствуют в заголовке не менее чем на TOPIC_TITLE_COVERAGE.
+    Если терминов нет — тема не подтверждена (безопасный отказ).
+    """
+    if not claim or not source_title:
+        return False
+
+    claim_terms = _topic_terms(claim)
+
+    if len(claim_terms) < 2:
+        return False
+
+    title_terms = _topic_terms(source_title)
+
+    if not (extract_years(claim) & extract_years(source_title)):
+        return False
+
+    found = claim_terms & title_terms
+
+    return len(found) / len(claim_terms) >= TOPIC_TITLE_COVERAGE
+
+
+def check_topic_host_conflict(claim, sentence, source_title):
+    """
+    Страновое противоречие без порогов matched/coverage, но только когда
+    тема источника подтверждена заголовком.
+    Возвращает "противоречит" или None.
+    """
+    claim_hosted = _country_groups(extract_hosted_countries(claim))
+
+    if not claim_hosted:
+        return None
+
+    sentence_hosted = _country_groups(extract_hosted_countries(sentence))
+
+    if not sentence_hosted or (claim_hosted & sentence_hosted):
+        return None
+
+    claim_years = extract_years(claim)
+    sentence_years = extract_years(sentence)
+
+    # P6-paren-v2: год в предложении не обязателен. Тема подтверждена
+    # заголовком, а большинство предложений статьи год не повторяют
+    # («Впервые ЧМ приняла Канада»). Требование года отсекало их все.
+    if claim_years and sentence_years and not (claim_years & sentence_years):
+        return None
+
+    # Защита ЧМ-США: обзорные предложения с другими годами — не противоречие
+    # («ЧМ-1994 прошёл в США», «ЧМ-2022 в Катаре»).
+    if claim_years and (sentence_years - claim_years):
+        return None
+
+    if not topic_confirmed(claim, source_title):
+        return None
+
+    print(
+        f"      [country_conflict] предикат привязан к стране "
+        f"(заголовок «{source_title[:50]}»); "
+        f"claim={sorted(claim_hosted)} vs sentence={sorted(sentence_hosted)} "
+        f"-> противоречит"
+    )
+
+    return "противоречит"
+
+
 def split_source_clauses(text):
     """
     Единый сплиттер текста источника: по заголовкам Википедии (==, ===),
@@ -1693,8 +1892,17 @@ def split_source_clauses(text):
     clauses = []
 
     for chunk in re.split(r"=+", text):
-        for part in re.split(r"(?<=[.!?;:])\s+|\s[—–]\s", chunk):
-            part = part.strip()
+        # P6-paren: тире внутри скобок не является границей фрагмента.
+        # Иначе "(все — Мексика)" распадается, и страна-хозяин теряется.
+        # Временная замена на служебный символ, который не режется ниже.
+        protected = re.sub(
+            r"\(([^()]*)\)",
+            lambda m: "(" + m.group(1).replace(" — ", " \u2063 ").replace(" – ", " \u2064 ") + ")",
+            chunk
+        )
+
+        for part in re.split(r"(?<=[.!?;:])\s+|\s[—–]\s", protected):
+            part = part.replace("\u2063", "—").replace("\u2064", "–").strip()
 
             if part:
                 clauses.append(part)
@@ -1738,7 +1946,8 @@ def find_best_sentences(claim, text, max_sentences=3):
     # Годы утверждения и годы заголовка источника (первый фрагмент текста —
     # это title, так его собирает estimate_support).
     claim_years = extract_years(claim)
-    title_years = extract_years(text.split(". ", 1)[0]) if text else set()
+    source_title = text.split(". ", 1)[0] if text else ""
+    title_years = extract_years(source_title)
 
     matches = []
 
@@ -1756,7 +1965,14 @@ def find_best_sentences(claim, text, max_sentences=3):
         matched_weight = sum(weights[lem] for lem in matched)
         coverage = matched_weight / total_weight
 
-        if matched_count < 1:
+        # P6-hostgate: предложение с привязанной страной-хозяином допускаем
+        # к анализу даже без совпавших терминов. «Впервые ЧМ приняла Канада»
+        # не содержит слов claim, но именно такие фразы и опровергают
+        # неверную страну проведения. Решение принимает
+        # check_topic_host_conflict — там своя проверка темы по заголовку.
+        has_hosted = bool(extract_hosted_countries(sentence_clean))
+
+        if matched_count < 1 and not has_hosted:
             continue
 
         numeric_check = check_numeric_relation(claim, sentence_clean)
@@ -1784,6 +2000,13 @@ def find_best_sentences(claim, text, max_sentences=3):
         country_check = check_country_conflict(
             claim, sentence_clean, matched_count, coverage
         )
+
+        # Тематическая ветка: хозяева без порогов, но только при совпадении
+        # вида спорта и года в заголовке источника.
+        if country_check is None:
+            country_check = check_topic_host_conflict(
+                claim, sentence_clean, source_title
+            )
 
         # v8: несовпадение годов или стран БЛОКИРУЕТ подтверждение,
         # но само по себе не является противоречием (в Википедии про ЧМ
@@ -1836,8 +2059,15 @@ def find_best_sentences(claim, text, max_sentences=3):
             "country_check": country_check
         })
 
+    # P6-evidence: противоречие важнее совпадения — иначе нейтральные
+    # заголовочные фразы (много общих терминов, coverage высокий) вытесняют
+    # из среза именно те предложения, которые опровергают утверждение.
     matches.sort(
-        key=lambda item: (item["matched_groups"], item["coverage"]),
+        key=lambda item: (
+            1 if item["status"] == "противоречит" else 0,
+            item["matched_groups"],
+            item["coverage"],
+        ),
         reverse=True
     )
 
