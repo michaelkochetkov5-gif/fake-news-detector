@@ -36,7 +36,7 @@ _VERDICT_RE = re.compile(
     re.IGNORECASE,
 )
 _CONF_RE = re.compile(
-    r'(?:confidence|уверенность)["\']?\s*[:=]\s*["\']?\s*(\d+(?:[.,]\d+)?)\s*%?',
+    r'confidence["\']?\s*[:=]\s*["\']?\s*(\d+(?:\s*[.,]\s*\d+)?)\s*%?'
     re.IGNORECASE,
 )
 _REASON_RE = re.compile(
@@ -55,7 +55,9 @@ def _normalise_confidence(raw):
     if raw is None:
         return 0.0
     try:
-        value = float(str(raw).strip().replace(",", ".").rstrip("%").strip())
+        value = float(
+    re.sub(r"\s+", "", str(raw).strip()).replace(",", ".")
+)
     except (TypeError, ValueError):
         return 0.0
     if 1.0 < value <= 100.0:
