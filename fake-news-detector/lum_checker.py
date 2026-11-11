@@ -36,8 +36,10 @@ _VERDICT_RE = re.compile(
     re.IGNORECASE,
 )
 _CONF_RE = re.compile(
-    r'confidence["\']?\s*[:=]\s*["\']?\s*(\d+(?:\s*[.,]\s*\d+)?)\s*%?'
+    r'(?:confidence|уверенность)["\']?\s*[:=]\s*["\']?\s*'
+    r'(\d+(?:\s*[.,]\s*\d+)?)\s*%?',
     re.IGNORECASE,
+)
 )
 _REASON_RE = re.compile(
     r'(?:reason|причина)["\']?\s*[:=]\s*["\']((?:[^"\'\\]|\\.)*)',
