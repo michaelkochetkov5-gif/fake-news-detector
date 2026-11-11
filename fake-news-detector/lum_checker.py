@@ -40,7 +40,6 @@ _CONF_RE = re.compile(
     r'(\d+(?:\s*[.,]\s*\d+)?)\s*%?',
     re.IGNORECASE,
 )
-)
 _REASON_RE = re.compile(
     r'(?:reason|причина)["\']?\s*[:=]\s*["\']((?:[^"\'\\]|\\.)*)',
     re.IGNORECASE,
