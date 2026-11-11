@@ -1,96 +1,19 @@
 import streamlit as st
 import pandas as pd
-import os
-import time
-import joblib
 
 from main_code import FactChecker
+from lum_checker import LUMChecker, combine, is_confident, SOURCE_MESSAGES
+from pymorphy3 import MorphAnalyzer
 
-# БАГ 1: единая константа для метки фейка (по семантике site.py: 0 = ФЕЙК, 1 = ПРАВДА)
-FAKE_LABEL = 0
-
-# Пути к модели — относительно папки этого файла, чтобы работало
-# и локально, и на Streamlit Cloud независимо от рабочей директории
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODEL_PATH = os.path.join(BASE_DIR, "russian_fake_news_model_lemma_best.pkl")
-VECTORIZER_PATH = os.path.join(BASE_DIR, "russian_fake_news_vectorizer_lemma.pkl")
-
-
-def prepare_text(text):
-    """
-    БАГ 2: убираем лемматизацию - модель обучена на сырых текстах.
-    Оставляем только lowercase для соответствия TfidfVectorizer(lowercase=True).
-    """
-    return text.lower()
+morph = MorphAnalyzer()
 
 
 @st.cache_resource
-def load_model():
-    """
-    Загружает ML-модель и векторизатор.
-    Если файлов нет — возвращает (None, None), чтобы приложение не падало.
-    """
-    if not os.path.exists(MODEL_PATH) or not os.path.exists(VECTORIZER_PATH):
-        return None, None
-
-    model = joblib.load(MODEL_PATH)
-    vectorizer = joblib.load(VECTORIZER_PATH)
-    return model, vectorizer
+def load_lum_checker():
+    return LUMChecker()
 
 
-model, vectorizer = load_model()
-
-if model is None or vectorizer is None:
-    st.warning(
-        "⚠️ ML-модель не найдена в репозитории "
-        f"({os.path.basename(MODEL_PATH)}, {os.path.basename(VECTORIZER_PATH)}). "
-        "Тест будет работать только с чистым фактчекером. "
-        "Добавьте .pkl-файлы в Git и запушьте их, чтобы включить ML-модель."
-    )
-
-
-def analyze_style(text):
-    """
-    Независимый вердикт ML-модели.
-    Возвращает (вердикт, уверенность в процентах) или (None, 0.0),
-    если модель не загружена.
-    Поддерживает модели с predict_proba (LogReg, NaiveBayes)
-    и без него (LinearSVC) — через decision_function.
-    """
-    if model is None or vectorizer is None:
-        return None, 0.0
-
-    prepared = prepare_text(text)
-    features = vectorizer.transform([prepared])
-
-    # БАГ 1: находим индекс FAKE_LABEL в model.classes_ вместо жёсткого индекса [1]
-    try:
-        fake_idx = list(model.classes_).index(FAKE_LABEL)
-    except (ValueError, AttributeError):
-        fake_idx = 0
-
-    if hasattr(model, "predict_proba"):
-        # Модель с вероятностями (LogisticRegression, NaiveBayes и т.п.)
-        proba = model.predict_proba(features)[0]
-        fake_prob = proba[fake_idx]
-    elif hasattr(model, "decision_function"):
-        # LinearSVC и другие SVM: расстояние до разделяющей гиперплоскости
-        decision = model.decision_function(features)[0]
-        # Для бинарной классификации decision > 0 обычно означает класс 1
-        # Приводим к вероятности через сигмоиду
-        import math
-        fake_prob = 1.0 / (1.0 + math.exp(decision)) if fake_idx == 0 else 1.0 / (1.0 + math.exp(-decision))
-    else:
-        # Fallback: обычный predict без уверенности
-        prediction = model.predict(features)[0]
-        fake_prob = 1.0 if prediction == FAKE_LABEL else 0.0
-
-    if fake_prob >= 0.60:
-        return "ФЕЙК", round(fake_prob * 100, 1)
-    elif fake_prob <= 0.40:
-        return "ПРАВДА", round((1 - fake_prob) * 100, 1)
-    else:
-        return "НЕИЗВЕСТНО", round(max(fake_prob, 1 - fake_prob) * 100, 1)
+lum_checker = load_lum_checker()
 
 
 fact_checker = FactChecker()
@@ -216,21 +139,20 @@ TEST_CASES = [
     },
 ]
 
-st.title("🧪 Тест фактчекера и ML-модели")
+st.title("🧪 Тест фактчекера и LUM v2")
 st.write(
     "Тест подаёт проверенные и ложные утверждения по очереди. "
-    "Фактчекер и ML-модель проверяют текст независимо, "
-    "затем формируется общий вердикт."
+    "Сначала работает фактчекер; если он не дал уверенного вердикта, "
+    "подключается семантическая модель LUM v2."
 )
 
 if st.button("Запустить тест"):
     results = []
-    start_time = time.time()
 
     fact_correct = 0
     pure_fact_correct = 0
-    style_correct = 0
-    style_checked = 0
+    lum_correct = 0
+    lum_checked = 0
 
     progress = st.progress(0)
     status = st.empty()
@@ -253,42 +175,26 @@ if st.button("Запустить тест"):
                     sources.append(link)
         sources_count = len(sources)
 
-        # --- Независимый вердикт ML-модели ---
-        style_verdict, style_confidence = analyze_style(text)
+        # --- LUM v2: только как fallback ---
+        lum_result = None
+        if not is_confident(fact_result):
+            lum_result = lum_checker.verify(text)
 
         # --- Общий вердикт ---
-        if (
-            style_verdict is not None
-            and pure_fact_verdict == style_verdict
-            and pure_fact_verdict in ("ПРАВДА", "ФЕЙК")
-        ):
-            final_verdict = pure_fact_verdict
-            final_confidence = max(
-                pure_fact_confidence,
-                style_confidence / 100
-            )
-            final_reason = (
-                "Фактчекер и ML-модель согласны: вердикт подтверждён "
-                "обоими методами."
-            )
+        final = combine(fact_result, lum_result)
 
-        elif pure_fact_verdict in ("ПРАВДА", "ФЕЙК"):
-            final_verdict = pure_fact_verdict
-            final_confidence = pure_fact_confidence
-            final_reason = fact_result["reason"]
+        final_verdict = final["verdict"]
+        final_confidence = final["confidence"]
+        final_reason = final["reason"]
+        decision_source = final["decision_source"]
 
-        elif style_verdict in ("ПРАВДА", "ФЕЙК"):
-            final_verdict = style_verdict
-            final_confidence = style_confidence / 100
-            final_reason = (
-                "Фактчекер не определил вердикт; "
-                "ответ дан ML-моделью по стилю текста."
-            )
-
-        else:
-            final_verdict = "НЕИЗВЕСТНО"
-            final_confidence = pure_fact_confidence
-            final_reason = fact_result["reason"]
+        lum_verdict = "Не вызывалась"
+        lum_confidence = None
+        lum_raw = ""
+        if lum_result is not None:
+            lum_verdict = lum_result["verdict"]
+            lum_confidence = round(lum_result["confidence"] * 100, 1)
+            lum_raw = lum_result.get("raw_response", "")
 
         # --- Подсчёт точности ---
         fact_is_correct = final_verdict == expected
@@ -299,13 +205,10 @@ if st.button("Запустить тест"):
         if pure_fact_is_correct:
             pure_fact_correct += 1
 
-        if style_verdict is not None:
-            style_checked += 1
-            style_is_correct = style_verdict == expected
-            if style_is_correct:
-                style_correct += 1
-        else:
-            style_is_correct = None
+        if lum_verdict in ("ПРАВДА", "ФЕЙК"):
+            lum_checked += 1
+            if lum_verdict == expected:
+                lum_correct += 1
 
         results.append({
             "Текст": text,
@@ -314,8 +217,12 @@ if st.button("Запустить тест"):
             "Уверенность фактчекера": round(
                 pure_fact_confidence * 100, 1
             ),
-            "ML-модель": style_verdict or "Не применялась",
-            "Уверенность ML": round(style_confidence, 1),
+            "LUM v2": lum_verdict,
+            "Уверенность LUM": (
+                lum_confidence if lum_confidence is not None else "—"
+            ),
+            "decision_source": decision_source,
+            "raw_response": lum_raw,
             "Общий вердикт": final_verdict,
             "Уверенность общего": round(final_confidence * 100, 1),
             "Причина": final_reason,
@@ -328,25 +235,19 @@ if st.button("Запустить тест"):
 
     status.success("Тест завершён")
 
-    elapsed = time.time() - start_time
-    if elapsed < 60:
-        elapsed_str = f"{elapsed:.1f} сек"
-    else:
-        elapsed_str = f"{elapsed / 60:.1f} мин"
-
     total = len(TEST_CASES)
 
     fact_accuracy = fact_correct / total * 100
     pure_fact_accuracy = pure_fact_correct / total * 100
 
-    if style_checked > 0:
-        style_accuracy = style_correct / style_checked * 100
+    if lum_checked > 0:
+        lum_accuracy = lum_correct / lum_checked * 100
     else:
-        style_accuracy = 0
+        lum_accuracy = 0
 
     st.subheader("📊 Итоги теста")
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         st.metric(
@@ -362,8 +263,8 @@ if st.button("Запустить тест"):
 
     with col3:
         st.metric(
-            "ML-модель",
-            f"{style_accuracy:.1f}%"
+            "LUM v2",
+            f"{lum_accuracy:.1f}% ({lum_checked})"
         )
 
     with col4:
@@ -371,14 +272,6 @@ if st.button("Запустить тест"):
             "Проверено примеров",
             total
         )
-
-    with col5:
-        st.metric(
-            "Время теста",
-            elapsed_str
-        )
-
-    st.caption(f"⏱ Время работы теста: {elapsed_str} (в среднем {elapsed / total:.1f} сек на кейс)")
 
     st.subheader("📋 Подробные результаты")
 
@@ -388,7 +281,7 @@ if st.button("Запустить тест"):
         expected = row["Ожидалось"]
         final = row["Общий вердикт"]
         pure = row["Чистый фактчекер"]
-        ml = row["ML-модель"]
+        lum = row["LUM v2"]
 
         if final == expected:
             icon = "✅"
@@ -402,13 +295,14 @@ if st.button("Запустить тест"):
             f"({row['Уверенность фактчекера']}%)"
         )
         st.write(
-            f"**ML-модель:** {ml} "
-            f"({row['Уверенность ML']}%)"
+            f"**LUM v2:** {lum} "
+            f"({row['Уверенность LUM']}%)"
         )
         st.write(
             f"**Общий вердикт:** {final} "
             f"({row['Уверенность общего']}%)"
         )
+        st.write(f"**decision_source:** `{row['decision_source']}`")
         st.write(f"**Причина:** {row['Причина']}")
         st.write(f"**Источников найдено:** {row['Количество источников']}")
 
@@ -417,7 +311,13 @@ if st.button("Запустить тест"):
                 f"[Открыть первый источник]({row['Первая ссылка']})"
             )
 
+        if row.get("raw_response"):
+            with st.expander("🔧 raw_response LUM v2"):
+                st.code(row["raw_response"])
+
         st.divider()
 
 else:
     st.info("Нажми «Запустить тест», чтобы начать проверку.")
+
+# КОНЕЦ ФАЙЛА
