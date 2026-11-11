@@ -1,15 +1,11 @@
 import streamlit as st
-import joblib
 import re
 import json
 import hashlib
 from pymorphy3 import MorphAnalyzer
 from main_code import FactChecker
-from scipy.special import expit
+from lum_checker import LUMChecker, combine, is_confident, SOURCE_MESSAGES
 from datetime import datetime
-
-# БАГ 1: единая константа для метки фейка
-FAKE_LABEL = 0
 
 # ===== ФАКТЧЕКЕР =====
 @st.cache_resource
@@ -33,23 +29,18 @@ def save_cache(cache):
         json.dump(cache, file, ensure_ascii=False, indent=2, default=str)
 
 def get_cache_key(text):
-    return hashlib.md5(text.encode("utf-8")).hexdigest()
+    # v2: формат записи кэша изменился (было 4 значения, стало 2).
+    # Версия в ключе гарантирует, что старые записи не будут прочитаны
+    # и не упадут на распаковке.
+    return hashlib.md5(("lum-v2|" + text).encode("utf-8")).hexdigest()
 
-# ===== СТИЛЕВОЙ ОКРАС =====
+# ===== LUM v2 (fallback-ассистент) =====
 @st.cache_resource
-def load_style_model():
-    try:
-        model = joblib.load(
-            "fake-news-detector/russian_fake_news_model_lemma_best.pkl"
-        )
-        vectorizer = joblib.load(
-            "fake-news-detector/russian_fake_news_vectorizer_lemma.pkl"
-        )
-        return model, vectorizer
-    except (FileNotFoundError, OSError):
-        return None, None
+def load_lum_checker():
+    return LUMChecker()
 
-model, vectorizer = load_style_model()
+lum_checker = load_lum_checker()
+
 morph = MorphAnalyzer()
 
 # ===== ФУНКЦИИ =====
@@ -80,37 +71,6 @@ def lemmatize_text(text):
 
     return " ".join(lemmas)
 
-def analyze_style(text):
-    if model is None or vectorizer is None:
-        return None, 0.0, ""
-
-    cleaned = clean_text(text)
-    
-    # БАГ 2: убираем лемматизацию перед vectorizer.transform
-    # Модель обучена на сырых текстах, подаём cleaned напрямую
-    vectorized = vectorizer.transform([cleaned])
-
-    prediction = model.predict(vectorized)[0]
-
-    try:
-        probabilities = model.predict_proba(vectorized)[0]
-        # БАГ 1: находим индекс FAKE_LABEL вместо жёсткого индекса
-        try:
-            fake_idx = list(model.classes_).index(FAKE_LABEL)
-            fake_prob = probabilities[fake_idx]
-        except (ValueError, AttributeError):
-            fake_prob = probabilities[0]
-        
-        confidence = max(probabilities) * 100
-    except Exception:
-        decision = model.decision_function(vectorized)[0]
-        confidence = expit(abs(decision)) * 100
-
-    # Для отображения в UI сохраняем лемматизированную версию
-    lemmatized = lemmatize_text(cleaned)
-
-    return prediction, confidence, lemmatized
-
 # ===== SESSION STATE =====
 if "history" not in st.session_state:
     st.session_state.history = []
@@ -118,8 +78,6 @@ if "history" not in st.session_state:
 if "stats" not in st.session_state:
     st.session_state.stats = {
         "total": 0,
-        "fake_style": 0,
-        "truth_style": 0,
         "fake_fact": 0,
         "truth_fact": 0
     }
@@ -140,8 +98,6 @@ with st.sidebar:
     stats = st.session_state.stats
 
     st.metric("Всего проверок", stats["total"])
-    st.metric("Фейков (стилевой окрас)", stats["fake_style"])
-    st.metric("Правд (стилевой окрас)", stats["truth_style"])
     st.metric("Фейков (факты)", stats["fake_fact"])
     st.metric("Правд (факты)", stats["truth_fact"])
 
@@ -212,8 +168,8 @@ with col3:
 
 if clear_button:
     for key in [
-        "example", "fact_result", "prediction",
-        "confidence", "lemmatized"
+        "example", "fact_result", "lum_result",
+        "lemmatized"
     ]:
         if key in st.session_state:
             del st.session_state[key]
@@ -228,8 +184,7 @@ if st.session_state.get("load_history"):
 
     st.session_state["example"] = item["text"]
     st.session_state["fact_result"] = item["fact_result"]
-    st.session_state["prediction"] = item["prediction"]
-    st.session_state["confidence"] = item["confidence"]
+    st.session_state["lum_result"] = item.get("lum_result")
     st.session_state["lemmatized"] = item["lemmatized"]
     st.session_state["load_history"] = None
 
@@ -250,43 +205,33 @@ if check_button or "example" in st.session_state:
 
         if cache_key in cache:
             st.info("ℹ️ Результат загружен из кэша")
-            prediction, confidence, lemmatized, fact_result = cache[cache_key]
+            fact_result, lum_result = cache[cache_key]
+            lemmatized = lemmatize_text(clean_text(text_to_check))
         else:
-            word_count = len(text_to_check.split())
-
-            if word_count < 8:
-                prediction = None
-                confidence = 0.0
-                lemmatized = lemmatize_text(clean_text(text_to_check))
-            else:
-                with st.spinner("🔄 Анализ стилевого окраса..."):
-                    prediction, confidence, lemmatized = analyze_style(
-                        text_to_check
-                    )
+            lemmatized = lemmatize_text(clean_text(text_to_check))
 
             with st.spinner("🌐 Проверка фактов, Wikipedia и RSS..."):
                 fact_result = fact_checker.verify(text_to_check)
 
-            cache[cache_key] = (
-                prediction,
-                confidence,
-                lemmatized,
-                fact_result
-            )
+            # LUM v2 подключается только если фактчекер не дал
+            # уверенного вердикта по источникам.
+            lum_result = None
+            if not is_confident(fact_result):
+                with st.spinner(
+                    "🧠 Уточнение семантической моделью LUM v2..."
+                ):
+                    lum_result = lum_checker.verify(text_to_check)
+
+            fact_result = combine(fact_result, lum_result)
+
+            cache[cache_key] = (fact_result, lum_result)
             save_cache(cache)
 
         st.session_state["fact_result"] = fact_result
-        st.session_state["prediction"] = prediction
-        st.session_state["confidence"] = confidence
+        st.session_state["lum_result"] = lum_result
         st.session_state["lemmatized"] = lemmatized
 
         st.session_state.stats["total"] += 1
-
-        # Статистика по семантике: 0 = ФЕЙК, 1 = ПРАВДА
-        if prediction == FAKE_LABEL:
-            st.session_state.stats["fake_style"] += 1
-        elif prediction is not None:
-            st.session_state.stats["truth_style"] += 1
 
         if fact_result["verdict"] == "ФЕЙК":
             st.session_state.stats["fake_fact"] += 1
@@ -295,11 +240,10 @@ if check_button or "example" in st.session_state:
 
         st.session_state.history.append({
             "text": text_to_check,
-            "prediction": prediction,
-            "confidence": confidence,
             "fact_verdict": fact_result["verdict"],
             "time": datetime.now().strftime("%H:%M"),
             "fact_result": fact_result,
+            "lum_result": lum_result,
             "lemmatized": lemmatized
         })
 
@@ -322,106 +266,42 @@ if check_button or "example" in st.session_state:
             )
 
         with col3:
-            if prediction is None:
-                st.metric("Уверенность стилевого окраса", "—")
-            else:
-                st.metric(
-                    "Уверенность стилевого окраса",
-                    f"{confidence:.1f}%"
-                )
+            st.metric(
+                "Уверенность вердикта",
+                f"{fact_result['confidence']:.0%}"
+            )
 
         st.markdown("---")
-
-        col_fact, col_style = st.columns(2)
-
-        with col_fact:
-            st.markdown("### 🔍 Фактчекинг")
-
-            if fact_result["verdict"] == "ПРАВДА":
-                st.success(
-                    f"✅ {fact_result['verdict']} "
-                    f"({fact_result['confidence']:.0%})"
-                )
-            elif fact_result["verdict"] == "ФЕЙК":
-                st.error(
-                    f"❌ {fact_result['verdict']} "
-                    f"({fact_result['confidence']:.0%})"
-                )
-            else:
-                st.warning(
-                    f"⚠️ {fact_result['verdict']} "
-                    f"({fact_result['confidence']:.0%})"
-                )
-
-            st.info(f"📖 {fact_result['reason']}")
-
-        with col_style:
-            st.markdown("### 🎨 Стилевой окрас")
-
-            if prediction is None:
-                st.info(
-                    "➖ Не применялся: короткое утверждение, "
-                    "решение принимается по фактам."
-                )
-            elif prediction == FAKE_LABEL:
-                st.error(f"❌ ФЕЙК ({confidence:.1f}%)")
-            else:
-                st.success(f"✅ ПРАВДА ({confidence:.1f}%)")
 
         # ===== ИТОГ =====
-        st.markdown("---")
         st.subheader("🎯 Итоговый вердикт")
 
-        if fact_result["verdict"] == "ФЕЙК":
+        verdict = fact_result["verdict"]
+
+        if verdict == "ФЕЙК":
             st.error(
                 "❌ **ФЕЙКОВАЯ НОВОСТЬ** "
                 "(не соответствует фактам)"
             )
-            st.write(f"**Причина:** {fact_result['reason']}")
-
-        elif fact_result["verdict"] == "ПРАВДА":
+        elif verdict == "ПРАВДА":
             st.success(
                 "✅ **ПРАВДИВАЯ НОВОСТЬ** "
                 "(подтверждено фактами)"
             )
-            st.write(f"**Причина:** {fact_result['reason']}")
-
-        elif prediction is None:
-            st.warning(
-                "⚠️ **НЕ УДАЛОСЬ НАДЁЖНО ПРОВЕРИТЬ** "
-                "(короткое утверждение)"
-            )
-            st.write(f"**Причина:** {fact_result['reason']}")
-
-        elif (
-            fact_result["verdict"] == "НЕИЗВЕСТНО"
-            and confidence < 70
-        ):
+        else:
             st.warning(
                 "⚠️ **НЕДОСТАТОЧНО ДАННЫХ "
                 "ДЛЯ НАДЁЖНОГО ВЕРДИКТА**"
             )
-            st.write(f"**Причина:** {fact_result['reason']}")
-            st.write(
-                f"**Стилевой окрас:** "
-                f"{'ФЕЙК' if prediction == FAKE_LABEL else 'ПРАВДА'} "
-                f"({confidence:.1f}%)"
-            )
 
-        elif (
-            fact_result["verdict"] == "НЕИЗВЕСТНО"
-            and prediction == FAKE_LABEL
-        ):
-            st.error(
-                "❌ **Вероятно ФЕЙК** (стилевой окрас)"
-            )
-            st.write(f"**Уверенность:** {confidence:.1f}%")
+        st.write(f"**Причина:** {fact_result['reason']}")
+        st.caption(
+            SOURCE_MESSAGES.get(fact_result.get("decision_source"), "")
+        )
 
-        else:
-            st.success(
-                "✅ **Вероятно ПРАВДА** (стилевой окрас)"
-            )
-            st.write(f"**Уверенность:** {confidence:.1f}%")
+        if lum_checker.load_error:
+            with st.expander("🔧 Диагностика LUM v2"):
+                st.code(lum_checker.load_error)
 
         # ===== ИСТОЧНИКИ =====
         if fact_result.get("details"):
@@ -487,8 +367,8 @@ if check_button or "example" in st.session_state:
 
         if st.button("🔄 Проверить ещё один текст"):
             for key in [
-                "example", "fact_result", "prediction",
-                "confidence", "lemmatized"
+                "example", "fact_result", "lum_result",
+                "lemmatized"
             ]:
                 if key in st.session_state:
                     del st.session_state[key]
