@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+import os
+import torch
 
 from main_code import FactChecker
 from lum_checker import LUMChecker, combine, is_confident, SOURCE_MESSAGES
@@ -14,6 +16,18 @@ def load_lum_checker():
 
 
 lum_checker = load_lum_checker()
+
+with st.expander("🔧 Диагностика LUM v2"):
+    st.write(f"Текущая директория: `{os.getcwd()}`")
+    st.write(f"Путь адаптера: `{lum_checker.model_path}`")
+    st.write(f"Адаптер существует: `{os.path.exists(lum_checker.model_path)}`")
+    st.write(f"CUDA доступна: `{torch.cuda.is_available()}`")
+    st.write(f"Количество GPU: `{torch.cuda.device_count()}`")
+
+    loaded = lum_checker.load()
+    st.write(f"LUM загружена: `{loaded}`")
+    st.write(f"Ошибка загрузки: `{lum_checker.load_error}`")
+    st.write(f"LUM доступна: `{lum_checker.available}`")
 
 
 fact_checker = FactChecker()
@@ -191,10 +205,13 @@ if st.button("Запустить тест"):
         lum_verdict = "Не вызывалась"
         lum_confidence = None
         lum_raw = ""
+        lum_reason = ""
+
         if lum_result is not None:
             lum_verdict = lum_result["verdict"]
             lum_confidence = round(lum_result["confidence"] * 100, 1)
             lum_raw = lum_result.get("raw_response", "")
+            lum_reason = lum_result.get("reason", "")
 
         # --- Подсчёт точности ---
         fact_is_correct = final_verdict == expected
@@ -221,6 +238,7 @@ if st.button("Запустить тест"):
             "Уверенность LUM": (
                 lum_confidence if lum_confidence is not None else "—"
             ),
+            "LUM причина": lum_reason,
             "decision_source": decision_source,
             "raw_response": lum_raw,
             "Общий вердикт": final_verdict,
@@ -304,6 +322,10 @@ if st.button("Запустить тест"):
         )
         st.write(f"**decision_source:** `{row['decision_source']}`")
         st.write(f"**Причина:** {row['Причина']}")
+
+        if row.get("LUM причина"):
+            st.write(f"**Причина LUM:** {row['LUM причина']}")
+
         st.write(f"**Источников найдено:** {row['Количество источников']}")
 
         if row["Первая ссылка"]:
