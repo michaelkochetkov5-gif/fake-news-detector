@@ -1,7 +1,7 @@
-"""NLI zero-shot + numeric checker — CPU fallback для сайта."""
+"""LUM: NLI zero-shot + numeric checker — CPU fallback для сайта."""
 
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -15,9 +15,45 @@ NLI_MODEL_NAME = "cross-encoder/nli-deberta-v3-base"
 
 MIN_CONFIDENCE = 0.50
 
+SOURCE_MESSAGES = {
+    "factchecker": (
+        "Вердикт основан на проверке источников."
+    ),
+    "lum": (
+        "Вердикт основан на сравнении утверждения "
+        "с найденными источниками через NLI "
+        "и numeric checker."
+    ),
+    "factchecker+lum": (
+        "Фактчекер и LUM согласны."
+    ),
+    "nli": (
+        "Вердикт основан на сравнении утверждения "
+        "с найденными источниками через NLI "
+        "и numeric checker."
+    ),
+    "nli_no_premise": (
+        "LUM не получила тексты источников от FactChecker."
+    ),
+    "nli_uncertain": (
+        "LUM недостаточно уверена в вердикте."
+    ),
+    "nli_unavailable": "LUM недоступна.",
+    "nli_error": (
+        "LUM столкнулась с ошибкой "
+        "при анализе источников."
+    ),
+    "uncertain": (
+        "Недостаточно данных для надёжного вердикта."
+    ),
+}
+
 
 class NLIChecker:
-    def __init__(self, model_name: str = NLI_MODEL_NAME):
+    def __init__(
+        self,
+        model_name: str = NLI_MODEL_NAME,
+    ):
         self.model_name = model_name
         self.model = None
         self.load_error = None
@@ -28,7 +64,8 @@ class NLIChecker:
             self.model = CrossEncoder(model_name)
         except Exception as exc:
             self.load_error = (
-                f"NLI недоступна: {type(exc).__name__}: {exc}"
+                f"LUM недоступна: "
+                f"{type(exc).__name__}: {exc}"
             )
 
     @property
@@ -45,8 +82,12 @@ class NLIChecker:
         premises = []
 
         for detail in fact_result.get("details", []):
-            reason = str(detail.get("reason", "")).strip()
-            source = str(detail.get("source", "")).strip()
+            reason = str(
+                detail.get("reason", "")
+            ).strip()
+            source = str(
+                detail.get("source", "")
+            ).strip()
 
             if not reason and not source:
                 continue
@@ -84,7 +125,9 @@ class NLIChecker:
             return {
                 "verdict": VERDICT_UNKNOWN,
                 "confidence": 0.0,
-                "reason": f"NLI недоступна: {self.load_error}",
+                "reason": (
+                    f"LUM недоступна: {self.load_error}"
+                ),
                 "details": [],
                 "raw_response": "",
                 "decision_source": "nli_unavailable",
@@ -96,7 +139,10 @@ class NLIChecker:
             return {
                 "verdict": VERDICT_UNKNOWN,
                 "confidence": 0.0,
-                "reason": "NLI не нашла подходящих цитат из источников.",
+                "reason": (
+                    "LUM не нашла подходящих цитат "
+                    "из источников."
+                ),
                 "details": [],
                 "raw_response": "",
                 "decision_source": "nli_no_premise",
@@ -114,7 +160,7 @@ class NLIChecker:
                 "verdict": VERDICT_UNKNOWN,
                 "confidence": 0.0,
                 "reason": (
-                    f"Ошибка NLI-инференса: "
+                    f"Ошибка LUM-инференса: "
                     f"{type(exc).__name__}: {exc}"
                 ),
                 "details": [],
@@ -124,26 +170,30 @@ class NLIChecker:
 
         scores = np.asarray(scores)
 
-        # CrossEncoder возвращает logits.
-        # Преобразуем их в вероятности через softmax.
         exp_scores = np.exp(
-            scores - scores.max(axis=-1, keepdims=True)
+            scores
+            - scores.max(
+                axis=-1,
+                keepdims=True,
+            )
         )
 
-        probabilities = exp_scores / exp_scores.sum(
-            axis=-1,
-            keepdims=True,
+        probabilities = (
+            exp_scores
+            / exp_scores.sum(
+                axis=-1,
+                keepdims=True,
+            )
         )
 
-        # Порядок меток:
-        # 0 = contradiction
-        # 1 = entailment
-        # 2 = neutral
         contradiction_score = 0.0
         entailment_score = 0.0
         best_premise = ""
 
-        for premise, probability in zip(premises, probabilities):
+        for premise, probability in zip(
+            premises,
+            probabilities,
+        ):
             contradiction = float(probability[0])
             entailment = float(probability[1])
 
@@ -166,12 +216,16 @@ class NLIChecker:
             best_premise,
         )
 
-        adjusted = numeric_checker.adjust_nli_confidence(
-            contradiction_score,
-            numeric_result["features"],
+        adjusted = (
+            numeric_checker.adjust_nli_confidence(
+                contradiction_score,
+                numeric_result["features"],
+            )
         )
 
-        adjusted_contradiction = adjusted["p_contradiction"]
+        adjusted_contradiction = adjusted[
+            "p_contradiction"
+        ]
 
         if (
             adjusted["changed"]
@@ -184,9 +238,13 @@ class NLIChecker:
             return {
                 "verdict": VERDICT_UNKNOWN,
                 "confidence": confidence,
-                "reason": "NLI недостаточно уверена в вердикте.",
+                "reason": (
+                    "LUM недостаточно уверена в вердикте."
+                ),
                 "details": [],
-                "raw_response": str(probabilities.tolist()),
+                "raw_response": str(
+                    probabilities.tolist()
+                ),
                 "decision_source": "nli_uncertain",
             }
 
@@ -194,11 +252,14 @@ class NLIChecker:
             "verdict": verdict,
             "confidence": confidence,
             "reason": (
-                "NLI сравнила утверждение с найденным источником; "
-                "numeric checker проверил числовые совпадения."
+                "LUM сравнила утверждение с найденным "
+                "источником; numeric checker проверил "
+                "числовые совпадения."
             ),
             "details": [],
-            "raw_response": str(probabilities.tolist()),
+            "raw_response": str(
+                probabilities.tolist()
+            ),
             "decision_source": "nli",
         }
 
@@ -207,7 +268,10 @@ class NLIChecker:
         claim: str,
         fact_result: Dict[str, Any],
     ):
-        result = self.verify(claim, fact_result)
+        result = self.verify(
+            claim,
+            fact_result,
+        )
 
         return {
             "label": result["verdict"],
@@ -215,3 +279,115 @@ class NLIChecker:
             "details": result["details"],
             "explanation": result["reason"],
         }
+
+
+def is_confident(
+    fact_result: Dict[str, Any],
+) -> bool:
+    verdict = fact_result.get("verdict")
+    confidence = float(
+        fact_result.get("confidence", 0.0)
+    )
+
+    return (
+        verdict in (VERDICT_TRUE, VERDICT_FAKE)
+        and confidence >= MIN_CONFIDENCE
+    )
+
+
+def combine(
+    fact_result: Dict[str, Any],
+    lum_result: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    if lum_result is None:
+        return {
+            "verdict": fact_result.get(
+                "verdict",
+                VERDICT_UNKNOWN,
+            ),
+            "confidence": float(
+                fact_result.get("confidence", 0.0)
+            ),
+            "reason": fact_result.get(
+                "reason",
+                "Недостаточно данных "
+                "для надёжного вердикта.",
+            ),
+            "details": fact_result.get(
+                "details",
+                [],
+            ),
+            "decision_source": "factchecker",
+        }
+
+    fact_verdict = fact_result.get("verdict")
+    lum_verdict = lum_result.get("verdict")
+
+    fact_confidence = float(
+        fact_result.get("confidence", 0.0)
+    )
+    lum_confidence = float(
+        lum_result.get("confidence", 0.0)
+    )
+
+    if (
+        fact_verdict == lum_verdict
+        and fact_verdict in (
+            VERDICT_TRUE,
+            VERDICT_FAKE,
+        )
+    ):
+        confidence = max(
+            fact_confidence,
+            lum_confidence,
+        )
+
+        return {
+            "verdict": fact_verdict,
+            "confidence": confidence,
+            "reason": (
+                "FactChecker и LUM согласны в вердикте."
+            ),
+            "details": fact_result.get(
+                "details",
+                [],
+            ),
+            "decision_source": "factchecker+lum",
+        }
+
+    if lum_verdict in (
+        VERDICT_TRUE,
+        VERDICT_FAKE,
+    ):
+        return {
+            "verdict": lum_verdict,
+            "confidence": lum_confidence,
+            "reason": lum_result.get(
+                "reason",
+                "LUM определила вердикт "
+                "по найденным источникам.",
+            ),
+            "details": fact_result.get(
+                "details",
+                [],
+            ),
+            "decision_source": "lum",
+        }
+
+    return {
+        "verdict": fact_result.get(
+            "verdict",
+            VERDICT_UNKNOWN,
+        ),
+        "confidence": fact_confidence,
+        "reason": fact_result.get(
+            "reason",
+            "Недостаточно данных "
+            "для надёжного вердикта.",
+        ),
+        "details": fact_result.get(
+            "details",
+            [],
+        ),
+        "decision_source": "factchecker",
+    }
