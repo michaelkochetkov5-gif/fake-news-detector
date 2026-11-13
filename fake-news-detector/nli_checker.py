@@ -1,0 +1,186 @@
+"""NLI zero-shot + numeric checker — CPU fallback для сайта."""
+
+import re
+from typing import Any, Dict, List
+
+import numeric_checker
+
+VERDICT_TRUE = "ПРАВДА"
+VERDICT_FAKE = "ФЕЙК"
+VERDICT_UNKNOWN = "НЕИЗВЕСТНО"
+
+NLI_MODEL_NAME = "cross-encoder/nli-deberta-v3-base"
+
+MIN_CONFIDENCE = 0.50
+
+
+class NLIChecker:
+    def __init__(self, model_name: str = NLI_MODEL_NAME):
+        self.model_name = model_name
+        self.model = None
+        self.load_error = None
+
+        try:
+            from sentence_transformers import CrossEncoder
+
+            self.model = CrossEncoder(model_name)
+        except Exception as exc:
+            self.load_error = (
+                f"NLI недоступна: {type(exc).__name__}: {exc}"
+            )
+
+    @property
+    def available(self) -> bool:
+        return self.model is not None
+
+    def load(self) -> bool:
+        return self.available
+
+    def _extract_premises(
+        self,
+        fact_result: Dict[str, Any],
+    ) -> List[str]:
+        premises = []
+
+        for detail in fact_result.get("details", []):
+            reason = str(detail.get("reason", "")).strip()
+
+            if not reason:
+                continue
+
+            quotes = re.findall(
+                r'["«]([^"»]{20,500})["»]',
+                reason,
+            )
+
+            if quotes:
+                premises.extend(quotes[:3])
+            else:
+                premises.append(reason)
+
+        return premises[:3]
+
+    def verify(
+        self,
+        claim: str,
+        fact_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if not self.available:
+            return {
+                "verdict": VERDICT_UNKNOWN,
+                "confidence": 0.0,
+                "reason": f"NLI недоступна: {self.load_error}",
+                "details": [],
+                "raw_response": "",
+                "decision_source": "nli_unavailable",
+            }
+
+        premises = self._extract_premises(fact_result)
+
+        if not premises:
+            return {
+                "verdict": VERDICT_UNKNOWN,
+                "confidence": 0.0,
+                "reason": "NLI не нашла подходящих цитат из источников.",
+                "details": [],
+                "raw_response": "",
+                "decision_source": "nli_no_premise",
+            }
+
+        inputs = [
+            (premise, claim)
+            for premise in premises
+        ]
+
+        try:
+            scores = self.model.predict(inputs)
+        except Exception as exc:
+            return {
+                "verdict": VERDICT_UNKNOWN,
+                "confidence": 0.0,
+                "reason": (
+                    f"Ошибка NLI-инференса: "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+                "details": [],
+                "raw_response": "",
+                "decision_source": "nli_error",
+            }
+
+        contradiction_score = 0.0
+        entailment_score = 0.0
+        best_premise = ""
+        best_contradiction = 0.0
+
+        for premise, score in zip(premises, scores):
+            contradiction = float(score[0])
+            entailment = float(score[1])
+
+            if contradiction > contradiction_score:
+                contradiction_score = contradiction
+                best_premise = premise
+
+            if entailment > entailment_score:
+                entailment_score = entailment
+
+        if contradiction_score >= entailment_score:
+            verdict = VERDICT_FAKE
+            confidence = contradiction_score
+        else:
+            verdict = VERDICT_TRUE
+            confidence = entailment_score
+
+        numeric_result = numeric_checker.check_numbers(
+            claim,
+            best_premise,
+        )
+
+        adjusted = numeric_checker.adjust_nli_confidence(
+            contradiction_score,
+            numeric_result["features"],
+        )
+
+        adjusted_contradiction = adjusted["p_contradiction"]
+
+        if (
+            adjusted["changed"]
+            and adjusted_contradiction > entailment_score
+        ):
+            verdict = VERDICT_FAKE
+            confidence = adjusted_contradiction
+
+        if confidence < MIN_CONFIDENCE:
+            return {
+                "verdict": VERDICT_UNKNOWN,
+                "confidence": confidence,
+                "reason": "NLI недостаточно уверена в вердикте.",
+                "details": [],
+                "raw_response": str(scores.tolist()),
+                "decision_source": "nli_uncertain",
+            }
+
+        return {
+            "verdict": verdict,
+            "confidence": confidence,
+            "reason": (
+                "NLI сравнила утверждение с найденным источником; "
+                "numeric checker проверил числовые совпадения."
+            ),
+            "details": [],
+            "raw_response": str(scores.tolist()),
+            "decision_source": "nli",
+        }
+
+    def check_fact(
+        self,
+        claim: str,
+        fact_result: Dict[str, Any],
+    ):
+        result = self.verify(claim, fact_result)
+
+        return {
+            "label": result["verdict"],
+            "score": result["confidence"],
+            "details": result["details"],
+            "explanation": result["reason"],
+        }
