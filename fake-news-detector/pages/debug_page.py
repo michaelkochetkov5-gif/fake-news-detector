@@ -2,6 +2,62 @@ import streamlit as st
 import os
 import joblib
 
+import streamlit as st
+
+st.title("🔧 Диагностика импортов")
+
+st.write("Проверяю main_code...")
+
+try:
+    from main_code import search_duckduckgo
+    st.success("search_duckduckgo найден")
+except Exception as e:
+    st.error(f"search_duckduckgo: {e}")
+
+try:
+    from main_code import search_wikipedia_api
+    st.success("search_wikipedia_api найден")
+except Exception as e:
+    st.error(f"search_wikipedia_api: {e}")
+
+try:
+    from main_code import get_wikipedia_full_text
+    st.success("get_wikipedia_full_text найден")
+except Exception as e:
+    st.error(f"get_wikipedia_full_text: {e}")
+
+try:
+    from main_code import split_into_claims
+    st.success("split_into_claims найден")
+except Exception as e:
+    st.error(f"split_into_claims: {e}")
+
+try:
+    from main_code import check_sentence_with_nli
+    st.success("check_sentence_with_nli найден")
+except Exception as e:
+    st.error(f"check_sentence_with_nli: {e}")
+
+try:
+    from main_code import FACTCHECKER_VERSION
+    st.success(f"FACTCHECKER_VERSION: {FACTCHECKER_VERSION}")
+except Exception as e:
+    st.error(f"FACTCHECKER_VERSION: {e}")
+
+try:
+    from main_code import NLI_LOAD_ERROR
+    st.success("NLI_LOAD_ERROR найден")
+except Exception as e:
+    st.error(f"NLI_LOAD_ERROR: {e}")
+
+try:
+    from main_code import nli_model
+    st.success("nli_model найден")
+except Exception as e:
+    st.error(f"nli_model: {e}")
+
+st.stop()
+
 from main_code import (
     search_duckduckgo,
     search_wikipedia_api,
