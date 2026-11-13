@@ -299,6 +299,128 @@ def combine(
     fact_result: Dict[str, Any],
     lum_result: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
+    fact_verdict = fact_result.get(
+        "verdict",
+        VERDICT_UNKNOWN,
+    )
+    fact_confidence = float(
+        fact_result.get("confidence", 0.0)
+    )
+
+    if lum_result is None:
+        if not is_confident(fact_result):
+            return {
+                "verdict": VERDICT_UNKNOWN,
+                "confidence": 0.20,
+                "reason": (
+                    "FactChecker не дал уверенного вердикта, "
+                    "а LUM не была вызвана."
+                ),
+                "details": fact_result.get(
+                    "details",
+                    [],
+                ),
+                "decision_source": "uncertain",
+            }
+
+        return {
+            "verdict": fact_verdict,
+            "confidence": fact_confidence,
+            "reason": fact_result.get(
+                "reason",
+                "Вердикт основан на проверке источников.",
+            ),
+            "details": fact_result.get(
+                "details",
+                [],
+            ),
+            "decision_source": "factchecker",
+        }
+
+    lum_verdict = lum_result.get(
+        "verdict",
+        VERDICT_UNKNOWN,
+    )
+    lum_confidence = float(
+        lum_result.get("confidence", 0.0)
+    )
+
+    fact_is_confident = is_confident(
+        fact_result
+    )
+    lum_is_confident = (
+        lum_verdict in (
+            VERDICT_TRUE,
+            VERDICT_FAKE,
+        )
+        and lum_confidence >= MIN_CONFIDENCE
+    )
+
+    if (
+        fact_is_confident
+        and lum_is_confident
+        and fact_verdict == lum_verdict
+    ):
+        return {
+            "verdict": fact_verdict,
+            "confidence": max(
+                fact_confidence,
+                lum_confidence,
+            ),
+            "reason": (
+                "FactChecker и LUM согласны в вердикте."
+            ),
+            "details": fact_result.get(
+                "details",
+                [],
+            ),
+            "decision_source": "factchecker+lum",
+        }
+
+    if lum_is_confident:
+        return {
+            "verdict": lum_verdict,
+            "confidence": lum_confidence,
+            "reason": lum_result.get(
+                "reason",
+                "LUM определила вердикт "
+                "по найденным источникам.",
+            ),
+            "details": fact_result.get(
+                "details",
+                [],
+            ),
+            "decision_source": "lum",
+        }
+
+    if fact_is_confident:
+        return {
+            "verdict": fact_verdict,
+            "confidence": fact_confidence,
+            "reason": fact_result.get(
+                "reason",
+                "Вердикт основан на проверке источников.",
+            ),
+            "details": fact_result.get(
+                "details",
+                [],
+            ),
+            "decision_source": "factchecker",
+        }
+
+    return {
+        "verdict": VERDICT_UNKNOWN,
+        "confidence": 0.20,
+        "reason": (
+            "FactChecker и LUM не смогли дать "
+            "уверенный вердикт по найденным источникам."
+        ),
+        "details": fact_result.get(
+            "details",
+            [],
+        ),
+        "decision_source": "uncertain",
+    }
     if lum_result is None:
         return {
             "verdict": fact_result.get(
