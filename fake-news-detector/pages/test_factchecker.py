@@ -1,34 +1,19 @@
 import streamlit as st
 import pandas as pd
-import os
-import torch
 
 from main_code import FactChecker
-from lum_checker import LUMChecker, combine, is_confident, SOURCE_MESSAGES
-from pymorphy3 import MorphAnalyzer
-
-morph = MorphAnalyzer()
-
+from nli_checker import (
+    NLIChecker,
+    combine,
+    is_confident,
+    SOURCE_MESSAGES,
+)
 
 @st.cache_resource
 def load_lum_checker():
-    return LUMChecker()
-
+    return NLIChecker()
 
 lum_checker = load_lum_checker()
-
-with st.expander("🔧 Диагностика LUM v2"):
-    st.write(f"Текущая директория: `{os.getcwd()}`")
-    st.write(f"Путь адаптера: `{lum_checker.model_path}`")
-    st.write(f"Адаптер существует: `{os.path.exists(lum_checker.model_path)}`")
-    st.write(f"CUDA доступна: `{torch.cuda.is_available()}`")
-    st.write(f"Количество GPU: `{torch.cuda.device_count()}`")
-
-    loaded = lum_checker.load()
-    st.write(f"LUM загружена: `{loaded}`")
-    st.write(f"Ошибка загрузки: `{lum_checker.load_error}`")
-    st.write(f"LUM доступна: `{lum_checker.available}`")
-
 
 fact_checker = FactChecker()
 
@@ -153,17 +138,17 @@ TEST_CASES = [
     },
 ]
 
-st.title("🧪 Тест фактчекера и LUM v2")
+st.title("🧪 Тест фактчекера и LUM")
 st.write(
     "Тест подаёт проверенные и ложные утверждения по очереди. "
-    "Сначала работает фактчекер; если он не дал уверенного вердикта, "
-    "подключается семантическая модель LUM v2."
+    "Сначала работает FactChecker; если он не дал уверенного "
+    "вердикта, подключается LUM на основе NLI и numeric checker."
 )
 
 if st.button("Запустить тест"):
     results = []
 
-    fact_correct = 0
+    final_correct = 0
     pure_fact_correct = 0
     lum_correct = 0
     lum_checked = 0
@@ -175,32 +160,52 @@ if st.button("Запустить тест"):
         text = case["text"]
         expected = case["expected"]
 
-        status.write(f"Проверяю {i + 1} из {len(TEST_CASES)}: {text[:80]}...")
+        status.write(
+            f"Проверяю {i + 1} из {len(TEST_CASES)}: "
+            f"{text[:80]}..."
+        )
 
-        # --- Независимый вердикт фактчекера ---
         fact_result = fact_checker.verify(text)
+
         pure_fact_verdict = fact_result["verdict"]
-        pure_fact_confidence = fact_result["confidence"]
+        pure_fact_confidence = fact_result[
+            "confidence"
+        ]
 
         sources = []
-        for detail in fact_result.get("details", []):
-            for link in detail.get("links", []):
+
+        for detail in fact_result.get(
+            "details",
+            [],
+        ):
+            for link in detail.get(
+                "links",
+                [],
+            ):
                 if link:
                     sources.append(link)
+
         sources_count = len(sources)
 
-        # --- LUM v2: только как fallback ---
         lum_result = None
-        if not is_confident(fact_result):
-            lum_result = lum_checker.verify(text)
 
-        # --- Общий вердикт ---
-        final = combine(fact_result, lum_result)
+        if not is_confident(fact_result):
+            lum_result = lum_checker.verify(
+                text,
+                fact_result,
+            )
+
+        final = combine(
+            fact_result,
+            lum_result,
+        )
 
         final_verdict = final["verdict"]
         final_confidence = final["confidence"]
         final_reason = final["reason"]
-        decision_source = final["decision_source"]
+        decision_source = final[
+            "decision_source"
+        ]
 
         lum_verdict = "Не вызывалась"
         lum_confidence = None
@@ -208,58 +213,104 @@ if st.button("Запустить тест"):
         lum_reason = ""
 
         if lum_result is not None:
-            lum_verdict = lum_result["verdict"]
-            lum_confidence = round(lum_result["confidence"] * 100, 1)
-            lum_raw = lum_result.get("raw_response", "")
-            lum_reason = lum_result.get("reason", "")
+            lum_verdict = lum_result[
+                "verdict"
+            ]
+            lum_confidence = round(
+                lum_result["confidence"] * 100,
+                1,
+            )
+            lum_raw = lum_result.get(
+                "raw_response",
+                "",
+            )
+            lum_reason = lum_result.get(
+                "reason",
+                "",
+            )
 
-        # --- Подсчёт точности ---
-        fact_is_correct = final_verdict == expected
-        if fact_is_correct:
-            fact_correct += 1
+        final_is_correct = (
+            final_verdict == expected
+        )
 
-        pure_fact_is_correct = pure_fact_verdict == expected
+        if final_is_correct:
+            final_correct += 1
+
+        pure_fact_is_correct = (
+            pure_fact_verdict == expected
+        )
+
         if pure_fact_is_correct:
             pure_fact_correct += 1
 
-        if lum_verdict in ("ПРАВДА", "ФЕЙК"):
+        if lum_verdict in (
+            "ПРАВДА",
+            "ФЕЙК",
+        ):
             lum_checked += 1
+
             if lum_verdict == expected:
                 lum_correct += 1
 
         results.append({
             "Текст": text,
             "Ожидалось": expected,
-            "Чистый фактчекер": pure_fact_verdict,
-            "Уверенность фактчекера": round(
-                pure_fact_confidence * 100, 1
+            "Чистый фактчекер": (
+                pure_fact_verdict
             ),
-            "LUM v2": lum_verdict,
+            "Уверенность фактчекера": round(
+                pure_fact_confidence * 100,
+                1,
+            ),
+            "LUM": lum_verdict,
             "Уверенность LUM": (
-                lum_confidence if lum_confidence is not None else "—"
+                lum_confidence
+                if lum_confidence is not None
+                else "—"
             ),
             "LUM причина": lum_reason,
             "decision_source": decision_source,
             "raw_response": lum_raw,
             "Общий вердикт": final_verdict,
-            "Уверенность общего": round(final_confidence * 100, 1),
+            "Уверенность общего": round(
+                final_confidence * 100,
+                1,
+            ),
             "Причина": final_reason,
-            "Общий вердикт верен": "Да" if fact_is_correct else "Нет",
-            "Количество источников": sources_count,
-            "Первая ссылка": sources[0] if sources else ""
+            "Общий вердикт верен": (
+                "Да"
+                if final_is_correct
+                else "Нет"
+            ),
+            "Количество источников": (
+                sources_count
+            ),
+            "Первая ссылка": (
+                sources[0]
+                if sources
+                else ""
+            ),
         })
 
-        progress.progress((i + 1) / len(TEST_CASES))
+        progress.progress(
+            (i + 1) / len(TEST_CASES)
+        )
 
     status.success("Тест завершён")
 
     total = len(TEST_CASES)
 
-    fact_accuracy = fact_correct / total * 100
-    pure_fact_accuracy = pure_fact_correct / total * 100
+    final_accuracy = (
+        final_correct / total * 100
+    )
+    pure_fact_accuracy = (
+        pure_fact_correct / total * 100
+    )
 
     if lum_checked > 0:
-        lum_accuracy = lum_correct / lum_checked * 100
+        lum_accuracy = (
+            lum_correct / lum_checked * 100
+        )
     else:
         lum_accuracy = 0
 
@@ -270,25 +321,26 @@ if st.button("Запустить тест"):
     with col1:
         st.metric(
             "Общий вердикт",
-            f"{fact_accuracy:.1f}%"
+            f"{final_accuracy:.1f}%",
         )
 
     with col2:
         st.metric(
             "Чистый фактчекер",
-            f"{pure_fact_accuracy:.1f}%"
+            f"{pure_fact_accuracy:.1f}%",
         )
 
     with col3:
         st.metric(
-            "LUM v2",
-            f"{lum_accuracy:.1f}% ({lum_checked})"
+            "LUM",
+            f"{lum_accuracy:.1f}% "
+            f"({lum_checked})",
         )
 
     with col4:
         st.metric(
             "Проверено примеров",
-            total
+            total,
         )
 
     st.subheader("📋 Подробные результаты")
@@ -297,49 +349,82 @@ if st.button("Запустить тест"):
 
     for _, row in df.iterrows():
         expected = row["Ожидалось"]
-        final = row["Общий вердикт"]
-        pure = row["Чистый фактчекер"]
-        lum = row["LUM v2"]
+        final_verdict = row[
+            "Общий вердикт"
+        ]
+        pure = row[
+            "Чистый фактчекер"
+        ]
+        lum = row["LUM"]
 
-        if final == expected:
+        if final_verdict == expected:
             icon = "✅"
         else:
             icon = "❌"
 
-        st.markdown(f"### {icon} {row['Текст'][:120]}...")
-        st.write(f"**Ожидалось:** {expected}")
+        st.markdown(
+            f"### {icon} "
+            f"{row['Текст'][:120]}..."
+        )
+
+        st.write(
+            f"**Ожидалось:** {expected}"
+        )
+
         st.write(
             f"**Чистый фактчекер:** {pure} "
             f"({row['Уверенность фактчекера']}%)"
         )
+
         st.write(
-            f"**LUM v2:** {lum} "
+            f"**LUM:** {lum} "
             f"({row['Уверенность LUM']}%)"
         )
+
         st.write(
-            f"**Общий вердикт:** {final} "
+            f"**Общий вердикт:** "
+            f"{final_verdict} "
             f"({row['Уверенность общего']}%)"
         )
-        st.write(f"**decision_source:** `{row['decision_source']}`")
-        st.write(f"**Причина:** {row['Причина']}")
+
+        st.write(
+            f"**decision_source:** "
+            f"`{row['decision_source']}`"
+        )
+
+        st.write(
+            f"**Причина:** {row['Причина']}"
+        )
 
         if row.get("LUM причина"):
-            st.write(f"**Причина LUM:** {row['LUM причина']}")
+            st.write(
+                f"**Причина LUM:** "
+                f"{row['LUM причина']}"
+            )
 
-        st.write(f"**Источников найдено:** {row['Количество источников']}")
+        st.write(
+            f"**Источников найдено:** "
+            f"{row['Количество источников']}"
+        )
 
         if row["Первая ссылка"]:
             st.markdown(
-                f"[Открыть первый источник]({row['Первая ссылка']})"
+                f"[Открыть первый источник]"
+                f"({row['Первая ссылка']})"
             )
 
         if row.get("raw_response"):
-            with st.expander("🔧 raw_response LUM v2"):
-                st.code(row["raw_response"])
+            with st.expander(
+                "🔧 raw_response LUM"
+            ):
+                st.code(
+                    row["raw_response"]
+                )
 
         st.divider()
 
 else:
-    st.info("Нажми «Запустить тест», чтобы начать проверку.")
-
-# КОНЕЦ ФАЙЛА
+    st.info(
+        "Нажми «Запустить тест», "
+        "чтобы начать проверку."
+    )
