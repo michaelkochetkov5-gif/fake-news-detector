@@ -10,6 +10,7 @@ import numeric_checker
 VERDICT_TRUE = "ПРАВДА"
 VERDICT_FAKE = "ФЕЙК"
 VERDICT_UNKNOWN = "НЕИЗВЕСТНО"
+VERDICT_BIG_DOUBTS = "БОЛЬШИЕ СОМНЕНИЯ"
 
 NLI_MODEL_NAME = "cross-encoder/nli-deberta-v3-base"
 
@@ -44,7 +45,8 @@ SOURCE_MESSAGES = {
         "при анализе источников."
     ),
     "uncertain": (
-        "Недостаточно данных для надёжного вердикта."
+        "FactChecker и LUM не смогли дать "
+        "уверенный вердикт по найденным источникам."
     ),
 }
 
@@ -310,7 +312,7 @@ def combine(
     if lum_result is None:
         if not is_confident(fact_result):
             return {
-                "verdict": VERDICT_UNKNOWN,
+                "verdict": VERDICT_BIG_DOUBTS,
                 "confidence": 0.20,
                 "reason": (
                     "FactChecker не дал уверенного вердикта, "
@@ -409,7 +411,7 @@ def combine(
         }
 
     return {
-        "verdict": VERDICT_UNKNOWN,
+        "verdict": VERDICT_BIG_DOUBTS,
         "confidence": 0.20,
         "reason": (
             "FactChecker и LUM не смогли дать "
@@ -420,96 +422,4 @@ def combine(
             [],
         ),
         "decision_source": "uncertain",
-    }
-    if lum_result is None:
-        return {
-            "verdict": fact_result.get(
-                "verdict",
-                VERDICT_UNKNOWN,
-            ),
-            "confidence": float(
-                fact_result.get("confidence", 0.0)
-            ),
-            "reason": fact_result.get(
-                "reason",
-                "Недостаточно данных "
-                "для надёжного вердикта.",
-            ),
-            "details": fact_result.get(
-                "details",
-                [],
-            ),
-            "decision_source": "factchecker",
-        }
-
-    fact_verdict = fact_result.get("verdict")
-    lum_verdict = lum_result.get("verdict")
-
-    fact_confidence = float(
-        fact_result.get("confidence", 0.0)
-    )
-    lum_confidence = float(
-        lum_result.get("confidence", 0.0)
-    )
-
-    if (
-        fact_verdict == lum_verdict
-        and fact_verdict in (
-            VERDICT_TRUE,
-            VERDICT_FAKE,
-        )
-    ):
-        confidence = max(
-            fact_confidence,
-            lum_confidence,
-        )
-
-        return {
-            "verdict": fact_verdict,
-            "confidence": confidence,
-            "reason": (
-                "FactChecker и LUM согласны в вердикте."
-            ),
-            "details": fact_result.get(
-                "details",
-                [],
-            ),
-            "decision_source": "factchecker+lum",
-        }
-
-    if lum_verdict in (
-        VERDICT_TRUE,
-        VERDICT_FAKE,
-    ):
-        return {
-            "verdict": lum_verdict,
-            "confidence": lum_confidence,
-            "reason": lum_result.get(
-                "reason",
-                "LUM определила вердикт "
-                "по найденным источникам.",
-            ),
-            "details": fact_result.get(
-                "details",
-                [],
-            ),
-            "decision_source": "lum",
-        }
-
-    return {
-        "verdict": fact_result.get(
-            "verdict",
-            VERDICT_UNKNOWN,
-        ),
-        "confidence": fact_confidence,
-        "reason": fact_result.get(
-            "reason",
-            "Недостаточно данных "
-            "для надёжного вердикта.",
-        ),
-        "details": fact_result.get(
-            "details",
-            [],
-        ),
-        "decision_source": "factchecker",
     }
