@@ -1,15 +1,22 @@
 import streamlit as st
 import os
 import joblib
+
 from main_code import (
     search_duckduckgo,
     search_wikipedia_api,
     get_wikipedia_full_text,
-    split_into_claims
+    split_into_claims,
 )
+from query_extractor import extract_key_phrases
 
 st.title("🔧 Отладка фактчекера")
-from main_code import NLI_LOAD_ERROR, nli_model
+
+from main_code import (
+    NLI_LOAD_ERROR,
+    nli_model,
+    FACTCHECKER_VERSION,
+)
 
 if nli_model is None:
     st.error("NLI-модель не загружена")
@@ -19,32 +26,41 @@ if nli_model is None:
 
 else:
     st.success("NLI-модель загружена")
-from main_code import FACTCHECKER_VERSION
 
-st.info(f"Активная версия фактчекера: {FACTCHECKER_VERSION}")
+st.info(
+    f"Активная версия фактчекера: {FACTCHECKER_VERSION}"
+)
+
+# ===== 1. ML-МОДЕЛЬ =====
 st.subheader("1. Проверка ML-модели")
 
 model_paths = [
     "russian_fake_news_model_lemma_best.pkl",
     "fake-news-detector/russian_fake_news_model_lemma_best.pkl",
-    "pages/russian_fake_news_model_lemma_best.pkl"
+    "pages/russian_fake_news_model_lemma_best.pkl",
 ]
 
 vectorizer_paths = [
     "russian_fake_news_vectorizer_lemma.pkl",
     "fake-news-detector/russian_fake_news_vectorizer_lemma.pkl",
-    "pages/russian_fake_news_vectorizer_lemma.pkl"
+    "pages/russian_fake_news_vectorizer_lemma.pkl",
 ]
 
 st.write("Проверяю пути к модели:")
 
 for path in model_paths:
     exists = os.path.exists(path)
-    st.write(f"`{path}` — {'✅ найден' if exists else '❌ нет'}")
+    st.write(
+        f"`{path}` — "
+        f"{'✅ найден' if exists else '❌ нет'}"
+    )
 
 for path in vectorizer_paths:
     exists = os.path.exists(path)
-    st.write(f"`{path}` — {'✅ найден' if exists else '❌ нет'}")
+    st.write(
+        f"`{path}` — "
+        f"{'✅ найден' if exists else '❌ нет'}"
+    )
 
 model_path = None
 vectorizer_path = None
@@ -64,12 +80,16 @@ if model_path and vectorizer_path:
         model = joblib.load(model_path)
         vectorizer = joblib.load(vectorizer_path)
 
-        st.success("ML-модель успешно загружается")
+        st.success(
+            "ML-модель успешно загружается"
+        )
         st.write("Классы модели:")
         st.write(model.classes_)
 
     except Exception as e:
-        st.error(f"Ошибка загрузки модели: {e}")
+        st.error(
+            f"Ошибка загрузки модели: {e}"
+        )
 
 else:
     st.error(
@@ -79,11 +99,12 @@ else:
 
 st.divider()
 
+# ===== 2. РАЗБИЕНИЕ НА СМЫСЛЫ =====
 st.subheader("2. Разбиение на смыслы")
 
 test_text = st.text_input(
     "Текст для проверки",
-    value="Земля имеет форму шара."
+    value="Земля имеет форму шара.",
 )
 
 if st.button("Разбить на утверждения"):
@@ -96,17 +117,45 @@ if st.button("Разбить на утверждения"):
 
 st.divider()
 
-st.subheader("3. Проверка Wikipedia")
+# ===== 3. ИЗВЛЕЧЕНИЕ ПОИСКОВЫХ ФРАЗ =====
+st.subheader("3. Извлечение поисковых фраз")
+
+if st.button("Извлечь поисковые фразы"):
+    phrases = extract_key_phrases(test_text)
+
+    st.write(
+        f"Найдено фраз: {len(phrases)}"
+    )
+
+    if phrases:
+        for phrase in phrases:
+            st.write(f"- `{phrase}`")
+    else:
+        st.warning(
+            "Extractor не нашёл подходящих фраз."
+        )
+
+st.divider()
+
+# ===== 4. WIKIPEDIA =====
+st.subheader("4. Проверка Wikipedia")
 
 if st.button("Проверить Wikipedia"):
     results = search_wikipedia_api(test_text)
 
-    st.write(f"Wikipedia вернул результатов: {len(results)}")
+    st.write(
+        f"Wikipedia вернул результатов: "
+        f"{len(results)}"
+    )
 
     for result in results:
-        st.write(f"**{result['title']}**")
+        st.write(
+            f"**{result['title']}**"
+        )
         st.write(result["url"])
-        st.write(result["body"][:300])
+        st.write(
+            result["body"][:300]
+        )
         st.divider()
 
     if results:
@@ -115,27 +164,38 @@ if st.button("Проверить Wikipedia"):
         )
 
         st.write(
-            f"Длина полного текста первой статьи: {len(full_text)}"
+            f"Длина полного текста первой статьи: "
+            f"{len(full_text)}"
         )
         st.write(full_text[:500])
 
 st.divider()
 
-st.subheader("4. Проверка DuckDuckGo")
+# ===== 5. DUCKDUCKGO =====
+st.subheader("5. Проверка DuckDuckGo")
 
 if st.button("Проверить DuckDuckGo"):
     results = search_duckduckgo(test_text)
 
-    st.write(f"DuckDuckGo вернул результатов: {len(results)}")
+    st.write(
+        f"DuckDuckGo вернул результатов: "
+        f"{len(results)}"
+    )
 
     for result in results:
-        st.write(f"**{result['title']}**")
+        st.write(
+            f"**{result['title']}**"
+        )
         st.write(result["url"])
-        st.write(result["body"][:300])
+        st.write(
+            result["body"][:300]
+        )
         st.divider()
+
 st.divider()
 
-st.subheader("5. Проверка NLI")
+# ===== 6. NLI =====
+st.subheader("6. Проверка NLI")
 
 from main_code import check_sentence_with_nli
 
@@ -144,25 +204,32 @@ nli_sentence = st.text_area(
     value=(
         "Ещё в VI в. до нашей эры Пифагор считал, "
         "что Земля имеет шарообразную форму."
-    )
+    ),
 )
 
 nli_claim = st.text_area(
     "Проверяемое утверждение",
-    value="Земля имеет форму шара."
+    value="Земля имеет форму шара.",
 )
 
 if st.button("Проверить NLI"):
     status, score = check_sentence_with_nli(
         nli_claim,
-        nli_sentence
+        nli_sentence,
     )
 
-    st.write(f"Результат: **{status}**")
-    st.write(f"Уверенность: **{round(score * 100, 1)}%**")
+    st.write(
+        f"Результат: **{status}**"
+    )
+    st.write(
+        f"Уверенность: "
+        f"**{round(score * 100, 1)}%**"
+    )
+
 st.divider()
 
-st.subheader("6. Сырой ответ NLI-модели")
+# ===== 7. СЫРОЙ NLI =====
+st.subheader("7. Сырой ответ NLI-модели")
 
 from transformers import pipeline
 
@@ -170,8 +237,11 @@ from transformers import pipeline
 def load_raw_nli():
     return pipeline(
         "text-classification",
-        model="MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7",
-        truncation=True
+        model=(
+            "MoritzLaurer/"
+            "mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"
+        ),
+        truncation=True,
     )
 
 raw_nli = load_raw_nli()
@@ -182,23 +252,23 @@ raw_sentence = st.text_area(
         "Ещё в VI в. до нашей эры Пифагор считал, "
         "что Земля имеет шарообразную форму."
     ),
-    key="raw_nli_sentence"
+    key="raw_nli_sentence",
 )
 
 raw_claim = st.text_area(
     "Проверяемое утверждение для сырого NLI",
     value="Земля имеет форму шара.",
-    key="raw_nli_claim"
+    key="raw_nli_claim",
 )
 
 if st.button(
     "Показать сырой ответ NLI",
-    key="raw_nli_button"
+    key="raw_nli_button",
 ):
     result = raw_nli(
         {
             "text": raw_sentence,
-            "text_pair": raw_claim
+            "text_pair": raw_claim,
         }
     )
 
