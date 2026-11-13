@@ -34,9 +34,8 @@ def save_cache(cache):
         json.dump(cache, file, ensure_ascii=False, indent=2, default=str)
 
 def get_cache_key(text):
-    # v4: Qwen LUM удалён, NLI + numeric checker переименован в LUM.
     return hashlib.md5(
-        ("lum-nli-numeric-v1|" + text).encode("utf-8")
+        ("lum-nli-numeric-v2|" + text).encode("utf-8")
     ).hexdigest()
 
 # ===== LUM: NLI + NUMERIC CHECKER =====
@@ -60,17 +59,15 @@ def clean_text(text):
     return text.lower()
 
 def lemmatize_text(text):
-    """
-    Лемматизация для отображения в UI.
-    НЕ используется для ML-инференса.
-    """
     words = text.split()
     lemmas = []
 
     for word in words:
         if word.isalpha() and len(word) > 1:
             try:
-                lemmas.append(morph.parse(word)[0].normal_form)
+                lemmas.append(
+                    morph.parse(word)[0].normal_form
+                )
             except Exception:
                 lemmas.append(word)
 
@@ -84,17 +81,19 @@ if "stats" not in st.session_state:
     st.session_state.stats = {
         "total": 0,
         "fake_fact": 0,
-        "truth_fact": 0
+        "truth_fact": 0,
     }
 
 # ===== СТРАНИЦА =====
 st.set_page_config(
     page_title="🔍 Детектор Фейков",
     page_icon="🕵️",
-    layout="wide"
+    layout="wide",
 )
 
-st.title("🔍 Детектор Фейковых Новостей + Фактчекинг")
+st.title(
+    "🔍 Детектор Фейковых Новостей + Фактчекинг"
+)
 st.markdown("---")
 
 # ===== БОКОВАЯ ПАНЕЛЬ =====
@@ -102,15 +101,26 @@ with st.sidebar:
     st.header("📈 Статистика")
     stats = st.session_state.stats
 
-    st.metric("Всего проверок", stats["total"])
-    st.metric("Фейков (факты)", stats["fake_fact"])
-    st.metric("Правд (факты)", stats["truth_fact"])
+    st.metric(
+        "Всего проверок",
+        stats["total"],
+    )
+    st.metric(
+        "Фейков (факты)",
+        stats["fake_fact"],
+    )
+    st.metric(
+        "Правд (факты)",
+        stats["truth_fact"],
+    )
 
     st.header("📜 История")
 
     if st.session_state.history:
         for i, item in enumerate(
-            reversed(st.session_state.history[-10:]),
+            reversed(
+                st.session_state.history[-10:]
+            ),
             1,
         ):
             verdict_icon = (
@@ -129,9 +139,13 @@ with st.sidebar:
                 f"{verdict_icon} {short_text}",
                 key=f"history_{i}",
             ):
-                st.session_state["load_history"] = item
+                st.session_state[
+                    "load_history"
+                ] = item
 
-        st.session_state["load_history"] = None
+        st.session_state[
+            "load_history"
+        ] = None
     else:
         st.write("Пока нет проверок")
 
@@ -151,12 +165,17 @@ with st.sidebar:
     """)
 
 # ===== ОСНОВНОЙ ИНТЕРФЕЙС =====
-st.write("**Введите текст для проверки:**")
+st.write(
+    "**Введите текст для проверки:**"
+)
 
 user_input = st.text_area(
     "Текст",
     height=200,
-    placeholder="Введите текст новости, факта или утверждения...",
+    placeholder=(
+        "Введите текст новости, факта "
+        "или утверждения..."
+    ),
 )
 
 col1, col2, col3 = st.columns([1, 1, 1])
@@ -200,31 +219,48 @@ if st.session_state.get("load_history"):
     item = st.session_state["load_history"]
 
     st.session_state["example"] = item["text"]
-    st.session_state["fact_result"] = item["fact_result"]
-    st.session_state["original_fact_result"] = item.get(
+    st.session_state[
+        "fact_result"
+    ] = item["fact_result"]
+    st.session_state[
         "original_fact_result"
-    )
-    st.session_state["lum_result"] = item.get("lum_result")
-    st.session_state["lemmatized"] = item["lemmatized"]
-    st.session_state["load_history"] = None
+    ] = item.get("original_fact_result")
+    st.session_state[
+        "lum_result"
+    ] = item.get("lum_result")
+    st.session_state[
+        "lemmatized"
+    ] = item["lemmatized"]
+    st.session_state[
+        "load_history"
+    ] = None
 
     st.rerun()
 
 if check_button or "example" in st.session_state:
     text_to_check = (
-        st.session_state.get("example", user_input)
+        st.session_state.get(
+            "example",
+            user_input,
+        )
         if "example" in st.session_state
         else user_input
     )
 
     if text_to_check.strip() == "":
-        st.warning("⚠️ Пожалуйста, введите текст!")
+        st.warning(
+            "⚠️ Пожалуйста, введите текст!"
+        )
     else:
         cache = load_cache()
-        cache_key = get_cache_key(text_to_check)
+        cache_key = get_cache_key(
+            text_to_check
+        )
 
         if cache_key in cache:
-            st.info("ℹ️ Результат загружен из кэша")
+            st.info(
+                "ℹ️ Результат загружен из кэша"
+            )
 
             (
                 fact_result,
@@ -241,44 +277,35 @@ if check_button or "example" in st.session_state:
             )
 
             with st.spinner(
-                "🌐 Проверка фактов, Wikipedia и RSS..."
+                "🌐 Проверка фактов, "
+                "Wikipedia и RSS..."
             ):
-                original_fact_result = fact_checker.verify(
-                    text_to_check
+                original_fact_result = (
+                    fact_checker.verify(
+                        text_to_check
+                    )
                 )
 
             lum_result = None
 
-            # LUM подключается, только если FactChecker
-            # не дал уверенного вердикта.
-            if not is_confident(original_fact_result):
+            if not is_confident(
+                original_fact_result
+            ):
                 with st.spinner(
-                    "🧠 LUM сравнивает утверждение с источниками..."
+                    "🧠 LUM сравнивает утверждение "
+                    "с источниками..."
                 ):
-                    lum_result = lum_checker.verify(
-                        text_to_check,
-                        original_fact_result,
+                    lum_result = (
+                        lum_checker.verify(
+                            text_to_check,
+                            original_fact_result,
+                        )
                     )
 
-            if lum_result and lum_result["verdict"] in (
-                "ПРАВДА",
-                "ФЕЙК",
-            ):
-                fact_result = combine(
-                    original_fact_result,
-                    lum_result,
-                )
-
-                if fact_result.get(
-                    "decision_source"
-                ) == "factchecker+lum":
-                    fact_result["decision_source"] = "lum"
-
-            else:
-                fact_result = combine(
-                    original_fact_result,
-                    None,
-                )
+            fact_result = combine(
+                original_fact_result,
+                lum_result,
+            )
 
             cache[cache_key] = (
                 fact_result,
@@ -287,38 +314,60 @@ if check_button or "example" in st.session_state:
             )
             save_cache(cache)
 
-        st.session_state["fact_result"] = fact_result
+        st.session_state[
+            "fact_result"
+        ] = fact_result
         st.session_state[
             "original_fact_result"
         ] = original_fact_result
-        st.session_state["lum_result"] = lum_result
-        st.session_state["lemmatized"] = lemmatized
+        st.session_state[
+            "lum_result"
+        ] = lum_result
+        st.session_state[
+            "lemmatized"
+        ] = lemmatized
 
-        st.session_state.stats["total"] += 1
+        st.session_state.stats[
+            "total"
+        ] += 1
 
         if fact_result["verdict"] == "ФЕЙК":
-            st.session_state.stats["fake_fact"] += 1
+            st.session_state.stats[
+                "fake_fact"
+            ] += 1
         elif fact_result["verdict"] == "ПРАВДА":
-            st.session_state.stats["truth_fact"] += 1
+            st.session_state.stats[
+                "truth_fact"
+            ] += 1
 
         st.session_state.history.append({
             "text": text_to_check,
-            "fact_verdict": fact_result["verdict"],
-            "time": datetime.now().strftime("%H:%M"),
+            "fact_verdict": fact_result[
+                "verdict"
+            ],
+            "time": datetime.now().strftime(
+                "%H:%M"
+            ),
             "fact_result": fact_result,
-            "original_fact_result": original_fact_result,
+            "original_fact_result": (
+                original_fact_result
+            ),
             "lum_result": lum_result,
             "lemmatized": lemmatized,
         })
 
-        if len(st.session_state.history) > 20:
+        if len(
+            st.session_state.history
+        ) > 20:
             st.session_state.history = (
                 st.session_state.history[-20:]
             )
 
         # ===== РЕЗУЛЬТАТЫ =====
         st.markdown("---")
-        st.subheader("📊 Результат анализа")
+        st.subheader(
+            "📊 Результат анализа"
+        )
 
         col1, col2, col3 = st.columns(3)
 
@@ -343,11 +392,20 @@ if check_button or "example" in st.session_state:
         st.markdown("---")
 
         # ===== ИТОГ =====
-        st.subheader("🎯 Итоговый вердикт")
+        st.subheader(
+            "🎯 Итоговый вердикт"
+        )
 
         verdict = fact_result["verdict"]
 
-        if verdict == "ФЕЙК":
+        if verdict == "БОЛЬШИЕ СОМНЕНИЯ":
+            st.warning(
+                "⚠️ **БОЛЬШИЕ СОМНЕНИЯ** "
+                "(источники не позволяют надёжно "
+                "подтвердить или опровергнуть "
+                "утверждение)"
+            )
+        elif verdict == "ФЕЙК":
             st.error(
                 "❌ **ФЕЙКОВАЯ НОВОСТЬ** "
                 "(не соответствует фактам)"
@@ -363,17 +421,25 @@ if check_button or "example" in st.session_state:
                 "ДЛЯ НАДЁЖНОГО ВЕРДИКТА**"
             )
 
-        st.write(f"**Причина:** {fact_result['reason']}")
+        st.write(
+            f"**Причина:** "
+            f"{fact_result['reason']}"
+        )
+
         st.caption(
             SOURCE_MESSAGES.get(
-                fact_result.get("decision_source"),
+                fact_result.get(
+                    "decision_source"
+                ),
                 "",
             )
         )
 
         # ===== LUM =====
         if lum_result:
-            with st.expander("🧠 Результат LUM"):
+            with st.expander(
+                "🧠 Результат LUM"
+            ):
                 st.write(
                     f"**Вердикт LUM:** "
                     f"{lum_result['verdict']}"
@@ -391,26 +457,50 @@ if check_button or "example" in st.session_state:
                     f"`{lum_result.get('decision_source')}`"
                 )
 
-                if lum_result.get("raw_response"):
-                    st.code(lum_result["raw_response"])
+                if lum_result.get(
+                    "raw_response"
+                ):
+                    st.code(
+                        lum_result[
+                            "raw_response"
+                        ]
+                    )
 
         if lum_checker.load_error:
-            with st.expander("🔧 Диагностика LUM"):
-                st.code(lum_checker.load_error)
+            with st.expander(
+                "🔧 Диагностика LUM"
+            ):
+                st.code(
+                    lum_checker.load_error
+                )
 
         # ===== ИСТОЧНИКИ =====
-        if original_fact_result.get("details"):
+        if original_fact_result.get(
+            "details"
+        ):
             st.markdown("---")
-            st.subheader("🔗 Источники информации")
+            st.subheader(
+                "🔗 Источники информации"
+            )
 
             unique_details = []
             seen_links = set()
 
-            for detail in original_fact_result["details"]:
-                links = detail.get("links", [])
+            for detail in (
+                original_fact_result[
+                    "details"
+                ]
+            ):
+                links = detail.get(
+                    "links",
+                    [],
+                )
 
                 for link in links:
-                    if link and link not in seen_links:
+                    if (
+                        link
+                        and link not in seen_links
+                    ):
                         seen_links.add(link)
 
                         unique_details.append({
@@ -426,20 +516,32 @@ if check_button or "example" in st.session_state:
                 1,
             ):
                 st.markdown(
-                    f"{i}. [{item['link']}]({item['link']}) "
+                    f"{i}. "
+                    f"[{item['link']}]"
+                    f"({item['link']}) "
                     f"*( {item['reason']} )*"
                 )
 
             st.download_button(
                 label="📥 Скачать список ссылок",
-                data="\n".join(seen_links),
+                data="\n".join(
+                    seen_links
+                ),
                 file_name="sources.txt",
                 mime="text/plain",
             )
 
-        if original_fact_result.get("details"):
-            with st.expander("🔍 Детали проверки фактов"):
-                for detail in original_fact_result["details"]:
+        if original_fact_result.get(
+            "details"
+        ):
+            with st.expander(
+                "🔍 Детали проверки фактов"
+            ):
+                for detail in (
+                    original_fact_result[
+                        "details"
+                    ]
+                ):
                     icon = (
                         "✅"
                         if detail["result"] is True
@@ -449,32 +551,45 @@ if check_button or "example" in st.session_state:
                     )
 
                     st.write(
-                        f"{icon} **{detail['fact']}**"
+                        f"{icon} "
+                        f"**{detail['fact']}**"
                     )
                     st.write(
-                        f"   *Источник:* {detail['source']}"
+                        f"   *Источник:* "
+                        f"{detail['source']}"
                     )
                     st.write(
                         f"   *{detail['reason']}*"
                     )
 
-                    links = detail.get("links", [])
+                    links = detail.get(
+                        "links",
+                        [],
+                    )
 
                     if links:
-                        st.write("   **Ссылки:**")
+                        st.write(
+                            "   **Ссылки:**"
+                        )
 
                         for link in links:
                             st.markdown(
-                                f"   - [{link}]({link}) "
-                                f"*( {detail['reason']} )*"
+                                f"   - "
+                                f"[{link}]({link}) "
+                                f"*( "
+                                f"{detail['reason']} )*"
                             )
 
                     st.divider()
 
-        with st.expander("🔧 Предобработанный текст"):
+        with st.expander(
+            "🔧 Предобработанный текст"
+        ):
             st.code(lemmatized)
 
-        if st.button("🔄 Проверить ещё один текст"):
+        if st.button(
+            "🔄 Проверить ещё один текст"
+        ):
             for key in [
                 "example",
                 "fact_result",
