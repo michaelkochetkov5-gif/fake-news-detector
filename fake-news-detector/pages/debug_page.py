@@ -2,62 +2,6 @@ import streamlit as st
 import os
 import joblib
 
-import streamlit as st
-
-st.title("🔧 Диагностика импортов")
-
-st.write("Проверяю main_code...")
-
-try:
-    from main_code import search_duckduckgo
-    st.success("search_duckduckgo найден")
-except Exception as e:
-    st.error(f"search_duckduckgo: {e}")
-
-try:
-    from main_code import search_wikipedia_api
-    st.success("search_wikipedia_api найден")
-except Exception as e:
-    st.error(f"search_wikipedia_api: {e}")
-
-try:
-    from main_code import get_wikipedia_full_text
-    st.success("get_wikipedia_full_text найден")
-except Exception as e:
-    st.error(f"get_wikipedia_full_text: {e}")
-
-try:
-    from main_code import split_into_claims
-    st.success("split_into_claims найден")
-except Exception as e:
-    st.error(f"split_into_claims: {e}")
-
-try:
-    from main_code import check_sentence_with_nli
-    st.success("check_sentence_with_nli найден")
-except Exception as e:
-    st.error(f"check_sentence_with_nli: {e}")
-
-try:
-    from main_code import FACTCHECKER_VERSION
-    st.success(f"FACTCHECKER_VERSION: {FACTCHECKER_VERSION}")
-except Exception as e:
-    st.error(f"FACTCHECKER_VERSION: {e}")
-
-try:
-    from main_code import NLI_LOAD_ERROR
-    st.success("NLI_LOAD_ERROR найден")
-except Exception as e:
-    st.error(f"NLI_LOAD_ERROR: {e}")
-
-try:
-    from main_code import nli_model
-    st.success("nli_model найден")
-except Exception as e:
-    st.error(f"nli_model: {e}")
-
-st.stop()
-
 from main_code import (
     search_duckduckgo,
     search_wikipedia_api,
@@ -67,25 +11,6 @@ from main_code import (
 from query_extractor import extract_key_phrases
 
 st.title("🔧 Отладка фактчекера")
-
-from main_code import (
-    NLI_LOAD_ERROR,
-    nli_model,
-    FACTCHECKER_VERSION,
-)
-
-if nli_model is None:
-    st.error("NLI-модель не загружена")
-
-    if NLI_LOAD_ERROR:
-        st.error(f"Причина: {NLI_LOAD_ERROR}")
-
-else:
-    st.success("NLI-модель загружена")
-
-st.info(
-    f"Активная версия фактчекера: {FACTCHECKER_VERSION}"
-)
 
 # ===== 1. ML-МОДЕЛЬ =====
 st.subheader("1. Проверка ML-модели")
@@ -247,86 +172,3 @@ if st.button("Проверить DuckDuckGo"):
             result["body"][:300]
         )
         st.divider()
-
-st.divider()
-
-# ===== 6. NLI =====
-st.subheader("6. Проверка NLI")
-
-from main_code import check_sentence_with_nli
-
-nli_sentence = st.text_area(
-    "Предложение из источника",
-    value=(
-        "Ещё в VI в. до нашей эры Пифагор считал, "
-        "что Земля имеет шарообразную форму."
-    ),
-)
-
-nli_claim = st.text_area(
-    "Проверяемое утверждение",
-    value="Земля имеет форму шара.",
-)
-
-if st.button("Проверить NLI"):
-    status, score = check_sentence_with_nli(
-        nli_claim,
-        nli_sentence,
-    )
-
-    st.write(
-        f"Результат: **{status}**"
-    )
-    st.write(
-        f"Уверенность: "
-        f"**{round(score * 100, 1)}%**"
-    )
-
-st.divider()
-
-# ===== 7. СЫРОЙ NLI =====
-st.subheader("7. Сырой ответ NLI-модели")
-
-from transformers import pipeline
-
-@st.cache_resource
-def load_raw_nli():
-    return pipeline(
-        "text-classification",
-        model=(
-            "MoritzLaurer/"
-            "mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"
-        ),
-        truncation=True,
-    )
-
-raw_nli = load_raw_nli()
-
-raw_sentence = st.text_area(
-    "Предложение из источника для сырого NLI",
-    value=(
-        "Ещё в VI в. до нашей эры Пифагор считал, "
-        "что Земля имеет шарообразную форму."
-    ),
-    key="raw_nli_sentence",
-)
-
-raw_claim = st.text_area(
-    "Проверяемое утверждение для сырого NLI",
-    value="Земля имеет форму шара.",
-    key="raw_nli_claim",
-)
-
-if st.button(
-    "Показать сырой ответ NLI",
-    key="raw_nli_button",
-):
-    result = raw_nli(
-        {
-            "text": raw_sentence,
-            "text_pair": raw_claim,
-        }
-    )
-
-    st.write("Полный ответ модели:")
-    st.json(result)
