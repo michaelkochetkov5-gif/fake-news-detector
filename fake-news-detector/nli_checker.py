@@ -46,21 +46,34 @@ class NLIChecker:
 
         for detail in fact_result.get("details", []):
             reason = str(detail.get("reason", "")).strip()
+            source = str(detail.get("source", "")).strip()
 
-            if not reason:
+            if not reason and not source:
                 continue
 
             quotes = re.findall(
-                r'["«]([^"»]{20,500})["»]',
+                r'["«]([^"»]{10,1000})["»]',
                 reason,
             )
 
             if quotes:
                 premises.extend(quotes[:3])
             else:
-                premises.append(reason)
+                if reason:
+                    premises.append(reason)
 
-        return premises[:3]
+                if source and source not in premises:
+                    premises.append(source)
+
+        cleaned_premises = []
+
+        for premise in premises:
+            premise = premise.strip()
+
+            if len(premise) >= 10:
+                cleaned_premises.append(premise)
+
+        return cleaned_premises[:3]
 
     def verify(
         self,
