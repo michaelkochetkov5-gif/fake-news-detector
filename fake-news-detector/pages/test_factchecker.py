@@ -167,7 +167,9 @@ if st.button("Запустить тест"):
 
         fact_result = fact_checker.verify(text)
 
-        pure_fact_verdict = fact_result["verdict"]
+        pure_fact_verdict = fact_result[
+            "verdict"
+        ]
         pure_fact_confidence = fact_result[
             "confidence"
         ]
@@ -201,7 +203,9 @@ if st.button("Запустить тест"):
         )
 
         final_verdict = final["verdict"]
-        final_confidence = final["confidence"]
+        final_confidence = final[
+            "confidence"
+        ]
         final_reason = final["reason"]
         decision_source = final[
             "decision_source"
@@ -343,7 +347,9 @@ if st.button("Запустить тест"):
             total,
         )
 
-    st.subheader("📋 Подробные результаты")
+    st.subheader(
+        "📋 Подробные результаты"
+    )
 
     df = pd.DataFrame(results)
 
@@ -359,6 +365,10 @@ if st.button("Запустить тест"):
 
         if final_verdict == expected:
             icon = "✅"
+        elif final_verdict == (
+            "БОЛЬШИЕ СОМНЕНИЯ"
+        ):
+            icon = "⚠️"
         else:
             icon = "❌"
 
