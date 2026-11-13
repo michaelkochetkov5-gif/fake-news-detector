@@ -5,6 +5,7 @@ import hashlib
 from pymorphy3 import MorphAnalyzer
 from main_code import FactChecker
 from lum_checker import LUMChecker, combine, is_confident, SOURCE_MESSAGES
+from nli_checker import NLIChecker
 from datetime import datetime
 
 # ===== ФАКТЧЕКЕР =====
@@ -29,12 +30,18 @@ def save_cache(cache):
         json.dump(cache, file, ensure_ascii=False, indent=2, default=str)
 
 def get_cache_key(text):
-    # v2: формат записи кэша изменился (было 4 значения, стало 2).
-    # Версия в ключе гарантирует, что старые записи не будут прочитаны
-    # и не упадут на распаковке.
-    return hashlib.md5(("lum-v2|" + text).encode("utf-8")).hexdigest()
+    # v3: добавлен NLI + numeric checker.
+    # Версия в ключе гарантирует, что старые записи не будут прочитаны.
+    return hashlib.md5(("nli-numeric-v1|" + text).encode("utf-8")).hexdigest()
 
-# ===== LUM v2 (fallback-ассистент) =====
+# ===== NLI + NUMERIC CHECKER =====
+@st.cache_resource
+def load_nli_checker():
+    return NLIChecker()
+
+nli_checker = load_nli_checker()
+
+# ===== LUM v2 (GPU fallback) =====
 @st.cache_resource
 def load_lum_checker():
     return LUMChecker()
@@ -57,7 +64,7 @@ def clean_text(text):
 def lemmatize_text(text):
     """
     Лемматизация для отображения в UI.
-    НЕ используется для ML-инференса (БАГ 2).
+    НЕ используется для ML-инференса.
     """
     words = text.split()
     lemmas = []
@@ -168,8 +175,8 @@ with col3:
 
 if clear_button:
     for key in [
-        "example", "fact_result", "lum_result",
-        "lemmatized"
+        "example", "fact_result", "original_fact_result",
+        "nli_result", "lum_result", "lemmatized"
     ]:
         if key in st.session_state:
             del st.session_state[key]
@@ -184,6 +191,10 @@ if st.session_state.get("load_history"):
 
     st.session_state["example"] = item["text"]
     st.session_state["fact_result"] = item["fact_result"]
+    st.session_state["original_fact_result"] = item.get(
+        "original_fact_result"
+    )
+    st.session_state["nli_result"] = item.get("nli_result")
     st.session_state["lum_result"] = item.get("lum_result")
     st.session_state["lemmatized"] = item["lemmatized"]
     st.session_state["load_history"] = None
@@ -205,29 +216,68 @@ if check_button or "example" in st.session_state:
 
         if cache_key in cache:
             st.info("ℹ️ Результат загружен из кэша")
-            fact_result, lum_result = cache[cache_key]
+
+            (
+                fact_result,
+                original_fact_result,
+                nli_result,
+                lum_result,
+            ) = cache[cache_key]
+
             lemmatized = lemmatize_text(clean_text(text_to_check))
         else:
             lemmatized = lemmatize_text(clean_text(text_to_check))
 
             with st.spinner("🌐 Проверка фактов, Wikipedia и RSS..."):
-                fact_result = fact_checker.verify(text_to_check)
+                original_fact_result = fact_checker.verify(text_to_check)
 
-            # LUM v2 подключается только если фактчекер не дал
-            # уверенного вердикта по источникам.
+            nli_result = None
             lum_result = None
-            if not is_confident(fact_result):
+
+            # NLI + numeric checker подключается, только если
+            # FactChecker не дал уверенного вердикта.
+            if not is_confident(original_fact_result):
                 with st.spinner(
-                    "🧠 Уточнение семантической моделью LUM v2..."
+                    "🔎 NLI сравнивает утверждение с источниками..."
                 ):
-                    lum_result = lum_checker.verify(text_to_check)
+                    nli_result = nli_checker.verify(
+                        text_to_check,
+                        original_fact_result,
+                    )
 
-            fact_result = combine(fact_result, lum_result)
+            # Если NLI дала уверенный вердикт — используем её.
+            if nli_result and nli_result["verdict"] in (
+                "ПРАВДА",
+                "ФЕЙК",
+            ):
+                fact_result = combine(
+                    original_fact_result,
+                    nli_result,
+                )
+            else:
+                # LUM остаётся последним fallback-слоем.
+                if not is_confident(original_fact_result):
+                    with st.spinner(
+                        "🧠 Уточнение семантической моделью LUM v2..."
+                    ):
+                        lum_result = lum_checker.verify(text_to_check)
 
-            cache[cache_key] = (fact_result, lum_result)
+                fact_result = combine(
+                    original_fact_result,
+                    lum_result,
+                )
+
+            cache[cache_key] = (
+                fact_result,
+                original_fact_result,
+                nli_result,
+                lum_result,
+            )
             save_cache(cache)
 
         st.session_state["fact_result"] = fact_result
+        st.session_state["original_fact_result"] = original_fact_result
+        st.session_state["nli_result"] = nli_result
         st.session_state["lum_result"] = lum_result
         st.session_state["lemmatized"] = lemmatized
 
@@ -243,6 +293,8 @@ if check_button or "example" in st.session_state:
             "fact_verdict": fact_result["verdict"],
             "time": datetime.now().strftime("%H:%M"),
             "fact_result": fact_result,
+            "original_fact_result": original_fact_result,
+            "nli_result": nli_result,
             "lum_result": lum_result,
             "lemmatized": lemmatized
         })
@@ -299,19 +351,58 @@ if check_button or "example" in st.session_state:
             SOURCE_MESSAGES.get(fact_result.get("decision_source"), "")
         )
 
+        # ===== NLI =====
+        if nli_result:
+            with st.expander("🔎 Результат NLI + numeric checker"):
+                st.write(
+                    f"**Вердикт NLI:** {nli_result['verdict']}"
+                )
+                st.write(
+                    f"**Уверенность NLI:** "
+                    f"{round(nli_result['confidence'] * 100, 1)}%"
+                )
+                st.write(
+                    f"**Причина NLI:** {nli_result['reason']}"
+                )
+                st.write(
+                    f"**decision_source NLI:** "
+                    f"`{nli_result.get('decision_source')}`"
+                )
+
+                if nli_result.get("raw_response"):
+                    st.code(nli_result["raw_response"])
+
+        # ===== LUM =====
+        if lum_result:
+            with st.expander("🧠 Результат LUM v2"):
+                st.write(
+                    f"**Вердикт LUM:** {lum_result['verdict']}"
+                )
+                st.write(
+                    f"**Уверенность LUM:** "
+                    f"{round(lum_result['confidence'] * 100, 1)}%"
+                )
+                st.write(
+                    f"**Причина LUM:** {lum_result['reason']}"
+                )
+
         if lum_checker.load_error:
             with st.expander("🔧 Диагностика LUM v2"):
                 st.code(lum_checker.load_error)
 
+        if nli_checker.load_error:
+            with st.expander("🔧 Диагностика NLI"):
+                st.code(nli_checker.load_error)
+
         # ===== ИСТОЧНИКИ =====
-        if fact_result.get("details"):
+        if original_fact_result.get("details"):
             st.markdown("---")
             st.subheader("🔗 Источники информации")
 
             unique_details = []
             seen_links = set()
 
-            for detail in fact_result["details"]:
+            for detail in original_fact_result["details"]:
                 links = detail.get("links", [])
 
                 for link in links:
@@ -336,9 +427,9 @@ if check_button or "example" in st.session_state:
                 mime="text/plain"
             )
 
-        if fact_result.get("details"):
+        if original_fact_result.get("details"):
             with st.expander("🔍 Детали проверки фактов"):
-                for detail in fact_result["details"]:
+                for detail in original_fact_result["details"]:
                     icon = (
                         "✅" if detail["result"] is True
                         else "❌" if detail["result"] is False
@@ -367,8 +458,8 @@ if check_button or "example" in st.session_state:
 
         if st.button("🔄 Проверить ещё один текст"):
             for key in [
-                "example", "fact_result", "lum_result",
-                "lemmatized"
+                "example", "fact_result", "original_fact_result",
+                "nli_result", "lum_result", "lemmatized"
             ]:
                 if key in st.session_state:
                     del st.session_state[key]
