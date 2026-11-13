@@ -106,6 +106,96 @@ class NLIChecker:
                 "raw_response": "",
                 "decision_source": "nli_error",
             }
+        
+        import numpy as np
+        
+        scores = np.asarray(scores)
+        
+        # CrossEncoder возвращает logits.
+        # Преобразуем их в вероятности через softmax.
+        exp_scores = np.exp(scores - scores.max(axis=-1, keepdims=True))
+        probabilities = exp_scores / exp_scores.sum(
+            axis=-1,
+            keepdims=True,
+        )
+        
+        # Порядок меток:
+        # 0 = contradiction
+        # 1 = entailment
+        # 2 = neutral
+        contradiction_score = 0.0
+        entailment_score = 0.0
+        best_premise = ""
+        
+        for premise, probability in zip(premises, probabilities):
+            contradiction = float(probability[0])
+            entailment = float(probability[1])
+        
+            if contradiction > contradiction_score:
+                contradiction_score = contradiction
+                best_premise = premise
+        
+            if entailment > entailment_score:
+                entailment_score = entailment
+        
+        if contradiction_score >= entailment_score:
+            verdict = VERDICT_FAKE
+            confidence = contradiction_score
+        else:
+            verdict = VERDICT_TRUE
+            confidence = entailment_score
+        
+        numeric_result = numeric_checker.check_numbers(
+            claim,
+            best_premise,
+        )
+        
+        adjusted = numeric_checker.adjust_nli_confidence(
+            contradiction_score,
+            numeric_result["features"],
+        )
+        
+        adjusted_contradiction = adjusted["p_contradiction"]
+        
+        if (
+            adjusted["changed"]
+            and adjusted_contradiction > entailment_score
+        ):
+            verdict = VERDICT_FAKE
+            confidence = adjusted_contradiction
+        
+        if confidence < MIN_CONFIDENCE:
+            return {
+                "verdict": VERDICT_UNKNOWN,
+                "confidence": confidence,
+                "reason": "NLI недостаточно уверена в вердикте.",
+                "details": [],
+                "raw_response": str(probabilities.tolist()),
+                "decision_source": "nli_uncertain",
+            }
+        
+        return {
+            "verdict": verdict,
+            "confidence": confidence,
+            "reason": (
+                "NLI сравнила утверждение с найденным источником; "
+                "numeric checker проверил числовые совпадения."
+            ),
+            "details": [],
+            "raw_response": str(probabilities.tolist()),
+            "decision_source": "nli",
+        }
+            return {
+                "verdict": VERDICT_UNKNOWN,
+                "confidence": 0.0,
+                "reason": (
+                    f"Ошибка NLI-инференса: "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+                "details": [],
+                "raw_response": "",
+                "decision_source": "nli_error",
+            }
 
         contradiction_score = 0.0
         entailment_score = 0.0
