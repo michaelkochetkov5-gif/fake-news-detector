@@ -254,6 +254,12 @@ if check_button or "example" in st.session_state:
                     original_fact_result,
                     nli_result,
                 )
+
+                # NLI — отдельный слой, а не LUM.
+                # Исправляем подпись источника решения.
+                if fact_result.get("decision_source") == "factchecker+lum":
+                    fact_result["decision_source"] = "nli"
+
             else:
                 # LUM остаётся последним fallback-слоем.
                 if not is_confident(original_fact_result):
