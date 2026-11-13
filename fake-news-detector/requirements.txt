@@ -11,3 +11,5 @@ beautifulsoup4
 wikipedia
 transformers
 torch
+sentence-transformers
+huggingface-hub
