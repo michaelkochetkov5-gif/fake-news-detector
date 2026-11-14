@@ -100,45 +100,6 @@
 
 ---
 
-## 🚀 Запуск
-
-### 1. Клонировать
-
-```bash
-git clone https://github.com/michaelkochetkov5-gif/fake-news-detector.git
-cd fake-news-detector/fake-news-detector
-```
-
-### 2. Установить зависимости
-
-```bash
-pip install -r requirements.txt
-```
-
-<details>
-<summary>Что устанавливается</summary>
-
-```
-streamlit, joblib, scikit-learn, scipy, pandas,
-pymorphy3, duckduckgo-search, feedparser, requests,
-beautifulsoup4, wikipedia, transformers, torch,
-sentence-transformers, huggingface-hub
-```
-
-</details>
-
-### 3. Запустить
-
-```bash
-streamlit run site.py
-```
-
-Приложение откроется на `http://localhost:8501`.
-
-> **Первый запуск занимает несколько минут** — NLI-модель (~700 МБ) скачивается с HuggingFace и кэшируется локально.
-
----
-
 ## 🖥 Интерфейс
 
 | Страница | Что показывает |
