@@ -1,4 +1,4 @@
-"""LUM v2 — семантический fallback-ассистент фактчекера.
+"""FLUD v2 — семантический fallback-ассистент фактчекера.
 
 Модель обучена через Unsloth / PEFT LoRA и лежит в локальной папке
 ``lum-factchecker-lora-v2``. Модуль импортируется без torch/unsloth:
@@ -8,7 +8,7 @@
 import json
 import re
 
-LUM_MODEL_PATH = "lum-factchecker-lora-v2"
+FLUD_MODEL_PATH = "lum-factchecker-lora-v2"
 
 VERDICT_TRUE = "ПРАВДА"
 VERDICT_FAKE = "ФЕЙК"
@@ -18,8 +18,8 @@ DECISION_THRESHOLD = 0.70
 
 SOURCE_MESSAGES = {
     "factchecker": "Вердикт основан на проверке источников.",
-    "lum": "Вердикт основан на семантической модели LUM v2.",
-    "factchecker+lum": "Фактчекер и LUM v2 согласны.",
+    "flud": "Вердикт основан на семантической модели FLUD v2.",
+    "factchecker+flud": "Фактчекер и FLUD v2 согласны.",
     "nli": "Вердикт основан на сравнении утверждения с найденными источниками через NLI и numeric checker.",
     "uncertain": "Недостаточно данных для надёжного вердикта.",
 }
@@ -75,8 +75,8 @@ def _strip_code_fences(text):
     return text
 
 
-def parse_lum_response(raw):
-    """Извлекает verdict/confidence/reason/sources_used из ответа LUM v2.
+def parse_flud_response(raw):
+    """Извлекает verdict/confidence/reason/sources_used из ответа FLUD v2.
 
     Сначала пробует разобрать JSON целиком, затем падает на регулярные
     выражения. Оба пути принимают confidence с точкой, запятой и знаком %.
@@ -148,12 +148,12 @@ def parse_lum_response(raw):
     return parsed
 
 
-class LUMChecker:
-    """Обёртка над LUM v2. Модель грузится лениво и только один раз."""
+class FLUDChecker:
+    """Обёртка над FLUD v2. Модель грузится лениво и только один раз."""
 
     def __init__(
         self,
-        model_path=LUM_MODEL_PATH,
+        model_path=FLUD_MODEL_PATH,
         max_seq_length=4096,
         load_in_4bit=True,
         max_new_tokens=256,
@@ -235,7 +235,7 @@ class LUMChecker:
             return {
                 "verdict": VERDICT_UNKNOWN,
                 "confidence": 0.0,
-                "reason": f"LUM v2 недоступна: {self.load_error}",
+                "reason": f"FLUD v2 недоступна: {self.load_error}",
                 "details": [],
                 "raw_response": "",
             }
@@ -270,17 +270,17 @@ class LUMChecker:
             return {
                 "verdict": VERDICT_UNKNOWN,
                 "confidence": 0.0,
-                "reason": f"Ошибка инференса LUM v2: {type(exc).__name__}: {exc}",
+                "reason": f"Ошибка инференса FLUD v2: {type(exc).__name__}: {exc}",
                 "details": [],
                 "raw_response": raw,
             }
 
-        parsed = parse_lum_response(raw)
+        parsed = parse_flud_response(raw)
 
         if not parsed["verdict_found"]:
-            reason = "Не удалось разобрать ответ LUM v2."
+            reason = "Не удалось разобрать ответ FLUD v2."
         else:
-            reason = parsed["reason"] or "LUM v2 не вернула обоснование."
+            reason = parsed["reason"] or "FLUD v2 не вернула обоснование."
 
         return {
             "verdict": parsed["verdict"],
@@ -322,40 +322,40 @@ def _as_float(value):
         return 0.0
 
 
-def combine(fact_result, lum_result):
-    """Сводит вердикты FactChecker и LUM v2 по подтверждённой таблице решений.
+def combine(fact_result, flud_result):
+    """Сводит вердикты FactChecker и FLUD v2 по подтверждённой таблице решений.
 
     Все существующие поля fact_result (verdict, confidence, reason, details)
     сохраняются; переопределяются только те, что требует итоговая логика.
     """
     fact_result = fact_result or {}
-    lum_result = lum_result or {}
+    flud_result = flud_result or {}
 
     fact_verdict = fact_result.get("verdict", VERDICT_UNKNOWN)
-    lum_verdict = lum_result.get("verdict", VERDICT_UNKNOWN)
+    flud_verdict = flud_result.get("verdict", VERDICT_UNKNOWN)
 
     fact_confidence = _as_float(fact_result.get("confidence"))
-    lum_confidence = _as_float(lum_result.get("confidence"))
+    flud_confidence = _as_float(flud_result.get("confidence"))
 
     final = dict(fact_result)
     final["details"] = fact_result.get("details", [])
 
-    # 1. FactChecker уверен — LUM не участвует.
+    # 1. FactChecker уверен — FLUD не участвует.
     if is_confident(fact_result):
         final["decision_source"] = "factchecker"
         return final
 
     # 2-4. FactChecker дал вердикт, но с низкой уверенностью.
     if fact_verdict in (VERDICT_TRUE, VERDICT_FAKE):
-        if lum_verdict == fact_verdict:
-            final["confidence"] = max(fact_confidence, lum_confidence)
-            final["decision_source"] = "factchecker+lum"
+        if flud_verdict == fact_verdict:
+            final["confidence"] = max(fact_confidence, flud_confidence)
+            final["decision_source"] = "factchecker+flud"
 
-        elif lum_verdict in (VERDICT_TRUE, VERDICT_FAKE):
+        elif flud_verdict in (VERDICT_TRUE, VERDICT_FAKE):
             final["verdict"] = VERDICT_UNKNOWN
-            final["confidence"] = min(fact_confidence, lum_confidence)
+            final["confidence"] = min(fact_confidence, flud_confidence)
             final["reason"] = (
-                "Фактчекер и LUM v2 дали противоположные вердикты; "
+                "Фактчекер и FLUD v2 дали противоположные вердикты; "
                 "требуется дополнительная проверка."
             )
             final["decision_source"] = "uncertain"
@@ -365,17 +365,17 @@ def combine(fact_result, lum_result):
 
         return final
 
-    # 5-6. FactChecker не определился — решает LUM.
-    if lum_verdict in (VERDICT_TRUE, VERDICT_FAKE):
-        final["verdict"] = lum_verdict
-        final["confidence"] = lum_confidence
-        final["reason"] = lum_result.get("reason") or fact_result.get("reason", "")
-        final["decision_source"] = "lum"
+    # 5-6. FactChecker не определился — решает FLUD.
+    if flud_verdict in (VERDICT_TRUE, VERDICT_FAKE):
+        final["verdict"] = flud_verdict
+        final["confidence"] = flud_confidence
+        final["reason"] = flud_result.get("reason") or fact_result.get("reason", "")
+        final["decision_source"] = "flud"
     else:
         final["verdict"] = VERDICT_UNKNOWN
         final["confidence"] = fact_confidence
         final["reason"] = (
-            fact_result.get("reason") or lum_result.get("reason") or ""
+            fact_result.get("reason") or flud_result.get("reason") or ""
         )
         final["decision_source"] = "uncertain"
 

@@ -1,4 +1,4 @@
-"""LUM: NLI zero-shot + numeric checker — CPU fallback для сайта."""
+"""FLUD: NLI zero-shot + numeric checker — CPU fallback для сайта."""
 
 import re
 from typing import Any, Dict, List, Optional
@@ -20,13 +20,13 @@ SOURCE_MESSAGES = {
     "factchecker": (
         "Вердикт основан на проверке источников."
     ),
-    "lum": (
+    "flud": (
         "Вердикт основан на сравнении утверждения "
         "с найденными источниками через NLI "
         "и numeric checker."
     ),
-    "factchecker+lum": (
-        "Фактчекер и LUM согласны."
+    "factchecker+flud": (
+        "Фактчекер и FLUD согласны."
     ),
     "nli": (
         "Вердикт основан на сравнении утверждения "
@@ -34,18 +34,18 @@ SOURCE_MESSAGES = {
         "и numeric checker."
     ),
     "nli_no_premise": (
-        "LUM не получила тексты источников от FactChecker."
+        "FLUD не получила тексты источников от FactChecker."
     ),
     "nli_uncertain": (
-        "LUM недостаточно уверена в вердикте."
+        "FLUD недостаточно уверена в вердикте."
     ),
-    "nli_unavailable": "LUM недоступна.",
+    "nli_unavailable": "FLUD недоступна.",
     "nli_error": (
-        "LUM столкнулась с ошибкой "
+        "FLUD столкнулась с ошибкой "
         "при анализе источников."
     ),
     "uncertain": (
-        "FactChecker и LUM не смогли дать "
+        "FactChecker и FLUD не смогли дать "
         "уверенный вердикт по найденным источникам."
     ),
 }
@@ -66,7 +66,7 @@ class NLIChecker:
             self.model = CrossEncoder(model_name)
         except Exception as exc:
             self.load_error = (
-                f"LUM недоступна: "
+                f"FLUD недоступна: "
                 f"{type(exc).__name__}: {exc}"
             )
 
@@ -128,7 +128,7 @@ class NLIChecker:
                 "verdict": VERDICT_UNKNOWN,
                 "confidence": 0.0,
                 "reason": (
-                    f"LUM недоступна: {self.load_error}"
+                    f"FLUD недоступна: {self.load_error}"
                 ),
                 "details": [],
                 "raw_response": "",
@@ -142,7 +142,7 @@ class NLIChecker:
                 "verdict": VERDICT_UNKNOWN,
                 "confidence": 0.0,
                 "reason": (
-                    "LUM не нашла подходящих цитат "
+                    "FLUD не нашла подходящих цитат "
                     "из источников."
                 ),
                 "details": [],
@@ -162,7 +162,7 @@ class NLIChecker:
                 "verdict": VERDICT_UNKNOWN,
                 "confidence": 0.0,
                 "reason": (
-                    f"Ошибка LUM-инференса: "
+                    f"Ошибка FLUD-инференса: "
                     f"{type(exc).__name__}: {exc}"
                 ),
                 "details": [],
@@ -241,7 +241,7 @@ class NLIChecker:
                 "verdict": VERDICT_UNKNOWN,
                 "confidence": confidence,
                 "reason": (
-                    "LUM недостаточно уверена в вердикте."
+                    "FLUD недостаточно уверена в вердикте."
                 ),
                 "details": [],
                 "raw_response": str(
@@ -254,7 +254,7 @@ class NLIChecker:
             "verdict": verdict,
             "confidence": confidence,
             "reason": (
-                "LUM сравнила утверждение с найденным "
+                "FLUD сравнила утверждение с найденным "
                 "источником; numeric checker проверил "
                 "числовые совпадения."
             ),
@@ -299,7 +299,7 @@ def is_confident(
 
 def combine(
     fact_result: Dict[str, Any],
-    lum_result: Optional[Dict[str, Any]],
+    flud_result: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
     fact_verdict = fact_result.get(
         "verdict",
@@ -309,14 +309,14 @@ def combine(
         fact_result.get("confidence", 0.0)
     )
 
-    if lum_result is None:
+    if flud_result is None:
         if not is_confident(fact_result):
             return {
                 "verdict": VERDICT_BIG_DOUBTS,
                 "confidence": 0.20,
                 "reason": (
                     "FactChecker не дал уверенного вердикта, "
-                    "а LUM не была вызвана."
+                    "а FLUD не была вызвана."
                 ),
                 "details": fact_result.get(
                     "details",
@@ -339,60 +339,60 @@ def combine(
             "decision_source": "factchecker",
         }
 
-    lum_verdict = lum_result.get(
+    flud_verdict = flud_result.get(
         "verdict",
         VERDICT_UNKNOWN,
     )
-    lum_confidence = float(
-        lum_result.get("confidence", 0.0)
+    flud_confidence = float(
+        flud_result.get("confidence", 0.0)
     )
 
     fact_is_confident = is_confident(
         fact_result
     )
-    lum_is_confident = (
-        lum_verdict in (
+    flud_is_confident = (
+        flud_verdict in (
             VERDICT_TRUE,
             VERDICT_FAKE,
         )
-        and lum_confidence >= MIN_CONFIDENCE
+        and flud_confidence >= MIN_CONFIDENCE
     )
 
     if (
         fact_is_confident
-        and lum_is_confident
-        and fact_verdict == lum_verdict
+        and flud_is_confident
+        and fact_verdict == flud_verdict
     ):
         return {
             "verdict": fact_verdict,
             "confidence": max(
                 fact_confidence,
-                lum_confidence,
+                flud_confidence,
             ),
             "reason": (
-                "FactChecker и LUM согласны в вердикте."
+                "FactChecker и FLUD согласны в вердикте."
             ),
             "details": fact_result.get(
                 "details",
                 [],
             ),
-            "decision_source": "factchecker+lum",
+            "decision_source": "factchecker+flud",
         }
 
-    if lum_is_confident:
+    if flud_is_confident:
         return {
-            "verdict": lum_verdict,
-            "confidence": lum_confidence,
-            "reason": lum_result.get(
+            "verdict": flud_verdict,
+            "confidence": flud_confidence,
+            "reason": flud_result.get(
                 "reason",
-                "LUM определила вердикт "
+                "FLUD определила вердикт "
                 "по найденным источникам.",
             ),
             "details": fact_result.get(
                 "details",
                 [],
             ),
-            "decision_source": "lum",
+            "decision_source": "flud",
         }
 
     if fact_is_confident:
@@ -414,7 +414,7 @@ def combine(
         "verdict": VERDICT_BIG_DOUBTS,
         "confidence": 0.20,
         "reason": (
-            "FactChecker и LUM не смогли дать "
+            "FactChecker и FLUD не смогли дать "
             "уверенный вердикт по найденным источникам."
         ),
         "details": fact_result.get(

@@ -35,15 +35,15 @@ def save_cache(cache):
 
 def get_cache_key(text):
     return hashlib.md5(
-        ("lum-nli-numeric-v2|" + text).encode("utf-8")
+        ("flud-nli-numeric-v2|" + text).encode("utf-8")
     ).hexdigest()
 
-# ===== LUM: NLI + NUMERIC CHECKER =====
+# ===== FLUD: NLI + NUMERIC CHECKER =====
 @st.cache_resource
-def load_lum_checker():
+def load_flud_checker():
     return NLIChecker()
 
-lum_checker = load_lum_checker()
+flud_checker = load_flud_checker()
 
 morph = MorphAnalyzer()
 
@@ -204,7 +204,7 @@ if clear_button:
         "example",
         "fact_result",
         "original_fact_result",
-        "lum_result",
+        "flud_result",
         "lemmatized",
     ]:
         if key in st.session_state:
@@ -226,8 +226,8 @@ if st.session_state.get("load_history"):
         "original_fact_result"
     ] = item.get("original_fact_result")
     st.session_state[
-        "lum_result"
-    ] = item.get("lum_result")
+        "flud_result"
+    ] = item.get("flud_result")
     st.session_state[
         "lemmatized"
     ] = item["lemmatized"]
@@ -265,7 +265,7 @@ if check_button or "example" in st.session_state:
             (
                 fact_result,
                 original_fact_result,
-                lum_result,
+                flud_result,
             ) = cache[cache_key]
 
             lemmatized = lemmatize_text(
@@ -286,17 +286,17 @@ if check_button or "example" in st.session_state:
                     )
                 )
 
-            lum_result = None
+            flud_result = None
 
             if not is_confident(
                 original_fact_result
             ):
                 with st.spinner(
-                    "🧠 LUM сравнивает утверждение "
+                    "🧠 FLUD сравнивает утверждение "
                     "с источниками..."
                 ):
-                    lum_result = (
-                        lum_checker.verify(
+                    flud_result = (
+                        flud_checker.verify(
                             text_to_check,
                             original_fact_result,
                         )
@@ -304,13 +304,13 @@ if check_button or "example" in st.session_state:
 
             fact_result = combine(
                 original_fact_result,
-                lum_result,
+                flud_result,
             )
 
             cache[cache_key] = (
                 fact_result,
                 original_fact_result,
-                lum_result,
+                flud_result,
             )
             save_cache(cache)
 
@@ -321,8 +321,8 @@ if check_button or "example" in st.session_state:
             "original_fact_result"
         ] = original_fact_result
         st.session_state[
-            "lum_result"
-        ] = lum_result
+            "flud_result"
+        ] = flud_result
         st.session_state[
             "lemmatized"
         ] = lemmatized
@@ -352,7 +352,7 @@ if check_button or "example" in st.session_state:
             "original_fact_result": (
                 original_fact_result
             ),
-            "lum_result": lum_result,
+            "flud_result": flud_result,
             "lemmatized": lemmatized,
         })
 
@@ -435,43 +435,43 @@ if check_button or "example" in st.session_state:
             )
         )
 
-        # ===== LUM =====
-        if lum_result:
+        # ===== FLUD =====
+        if flud_result:
             with st.expander(
-                "🧠 Результат LUM"
+                "🧠 Результат FLUD"
             ):
                 st.write(
-                    f"**Вердикт LUM:** "
-                    f"{lum_result['verdict']}"
+                    f"**Вердикт FLUD:** "
+                    f"{flud_result['verdict']}"
                 )
                 st.write(
-                    f"**Уверенность LUM:** "
-                    f"{round(lum_result['confidence'] * 100, 1)}%"
+                    f"**Уверенность FLUD:** "
+                    f"{round(flud_result['confidence'] * 100, 1)}%"
                 )
                 st.write(
-                    f"**Причина LUM:** "
-                    f"{lum_result['reason']}"
+                    f"**Причина FLUD:** "
+                    f"{flud_result['reason']}"
                 )
                 st.write(
-                    f"**decision_source LUM:** "
-                    f"`{lum_result.get('decision_source')}`"
+                    f"**decision_source FLUD:** "
+                    f"`{flud_result.get('decision_source')}`"
                 )
 
-                if lum_result.get(
+                if flud_result.get(
                     "raw_response"
                 ):
                     st.code(
-                        lum_result[
+                        flud_result[
                             "raw_response"
                         ]
                     )
 
-        if lum_checker.load_error:
+        if flud_checker.load_error:
             with st.expander(
-                "🔧 Диагностика LUM"
+                "🔧 Диагностика FLUD"
             ):
                 st.code(
-                    lum_checker.load_error
+                    flud_checker.load_error
                 )
 
         # ===== ИСТОЧНИКИ =====
@@ -594,7 +594,7 @@ if check_button or "example" in st.session_state:
                 "example",
                 "fact_result",
                 "original_fact_result",
-                "lum_result",
+                "flud_result",
                 "lemmatized",
             ]:
                 if key in st.session_state:

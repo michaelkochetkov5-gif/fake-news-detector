@@ -10,10 +10,10 @@ from nli_checker import (
 )
 
 @st.cache_resource
-def load_lum_checker():
+def load_flud_checker():
     return NLIChecker()
 
-lum_checker = load_lum_checker()
+flud_checker = load_flud_checker()
 
 fact_checker = FactChecker()
 
@@ -138,11 +138,11 @@ TEST_CASES = [
     },
 ]
 
-st.title("🧪 Тест фактчекера и LUM")
+st.title("🧪 Тест фактчекера и FLUD")
 st.write(
     "Тест подаёт проверенные и ложные утверждения по очереди. "
     "Сначала работает FactChecker; если он не дал уверенного "
-    "вердикта, подключается LUM на основе NLI и numeric checker."
+    "вердикта, подключается FLUD на основе NLI и numeric checker."
 )
 
 if st.button("Запустить тест"):
@@ -150,8 +150,8 @@ if st.button("Запустить тест"):
 
     final_correct = 0
     pure_fact_correct = 0
-    lum_correct = 0
-    lum_checked = 0
+    flud_correct = 0
+    flud_checked = 0
 
     progress = st.progress(0)
     status = st.empty()
@@ -189,17 +189,17 @@ if st.button("Запустить тест"):
 
         sources_count = len(sources)
 
-        lum_result = None
+        flud_result = None
 
         if not is_confident(fact_result):
-            lum_result = lum_checker.verify(
+            flud_result = flud_checker.verify(
                 text,
                 fact_result,
             )
 
         final = combine(
             fact_result,
-            lum_result,
+            flud_result,
         )
 
         final_verdict = final["verdict"]
@@ -211,24 +211,24 @@ if st.button("Запустить тест"):
             "decision_source"
         ]
 
-        lum_verdict = "Не вызывалась"
-        lum_confidence = None
-        lum_raw = ""
-        lum_reason = ""
+        flud_verdict = "Не вызывалась"
+        flud_confidence = None
+        flud_raw = ""
+        flud_reason = ""
 
-        if lum_result is not None:
-            lum_verdict = lum_result[
+        if flud_result is not None:
+            flud_verdict = flud_result[
                 "verdict"
             ]
-            lum_confidence = round(
-                lum_result["confidence"] * 100,
+            flud_confidence = round(
+                flud_result["confidence"] * 100,
                 1,
             )
-            lum_raw = lum_result.get(
+            flud_raw = flud_result.get(
                 "raw_response",
                 "",
             )
-            lum_reason = lum_result.get(
+            flud_reason = flud_result.get(
                 "reason",
                 "",
             )
@@ -247,14 +247,14 @@ if st.button("Запустить тест"):
         if pure_fact_is_correct:
             pure_fact_correct += 1
 
-        if lum_verdict in (
+        if flud_verdict in (
             "ПРАВДА",
             "ФЕЙК",
         ):
-            lum_checked += 1
+            flud_checked += 1
 
-            if lum_verdict == expected:
-                lum_correct += 1
+            if flud_verdict == expected:
+                flud_correct += 1
 
         results.append({
             "Текст": text,
@@ -266,15 +266,15 @@ if st.button("Запустить тест"):
                 pure_fact_confidence * 100,
                 1,
             ),
-            "LUM": lum_verdict,
-            "Уверенность LUM": (
-                lum_confidence
-                if lum_confidence is not None
+            "FLUD": flud_verdict,
+            "Уверенность FLUD": (
+                flud_confidence
+                if flud_confidence is not None
                 else "—"
             ),
-            "LUM причина": lum_reason,
+            "FLUD причина": flud_reason,
             "decision_source": decision_source,
-            "raw_response": lum_raw,
+            "raw_response": flud_raw,
             "Общий вердикт": final_verdict,
             "Уверенность общего": round(
                 final_confidence * 100,
@@ -311,12 +311,12 @@ if st.button("Запустить тест"):
         pure_fact_correct / total * 100
     )
 
-    if lum_checked > 0:
-        lum_accuracy = (
-            lum_correct / lum_checked * 100
+    if flud_checked > 0:
+        flud_accuracy = (
+            flud_correct / flud_checked * 100
         )
     else:
-        lum_accuracy = 0
+        flud_accuracy = 0
 
     st.subheader("📊 Итоги теста")
 
@@ -336,9 +336,9 @@ if st.button("Запустить тест"):
 
     with col3:
         st.metric(
-            "LUM",
-            f"{lum_accuracy:.1f}% "
-            f"({lum_checked})",
+            "FLUD",
+            f"{flud_accuracy:.1f}% "
+            f"({flud_checked})",
         )
 
     with col4:
@@ -361,7 +361,7 @@ if st.button("Запустить тест"):
         pure = row[
             "Чистый фактчекер"
         ]
-        lum = row["LUM"]
+        flud = row["FLUD"]
 
         if final_verdict == expected:
             icon = "✅"
@@ -387,8 +387,8 @@ if st.button("Запустить тест"):
         )
 
         st.write(
-            f"**LUM:** {lum} "
-            f"({row['Уверенность LUM']}%)"
+            f"**FLUD:** {flud} "
+            f"({row['Уверенность FLUD']}%)"
         )
 
         st.write(
@@ -406,10 +406,10 @@ if st.button("Запустить тест"):
             f"**Причина:** {row['Причина']}"
         )
 
-        if row.get("LUM причина"):
+        if row.get("FLUD причина"):
             st.write(
-                f"**Причина LUM:** "
-                f"{row['LUM причина']}"
+                f"**Причина FLUD:** "
+                f"{row['FLUD причина']}"
             )
 
         st.write(
@@ -425,7 +425,7 @@ if st.button("Запустить тест"):
 
         if row.get("raw_response"):
             with st.expander(
-                "🔧 raw_response LUM"
+                "🔧 raw_response FLUD"
             ):
                 st.code(
                     row["raw_response"]
