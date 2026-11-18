@@ -2374,6 +2374,14 @@ class FactChecker:
             item for item in evidence
             if any(q["status"] == "противоречит" for q in item["quotes"])
         ]
+        strong_confirming = [
+            item for item in confirming_sources
+            if any(
+                q["status"] == "подтверждает" and q.get("matched_groups", 0) >= 3
+                for q in item["quotes"]
+            )
+        ]
+
         numeric_contradictions = [
             item for item in evidence
             if any(q.get("numeric_check") == "противоречит" for q in item["quotes"])
@@ -2434,10 +2442,10 @@ class FactChecker:
                 "или фейк, нельзя."
             )
 
-        elif confirming_sources and not sensational:
+        elif strong_confirming and not sensational:
             verdict = "ПРАВДА"
 
-            if len(confirming_sources) >= 2:
+            if len(strong_confirming) >= 2:
                 confidence = max(0.68, min(0.68 + support * 0.2, 0.9))
             else:
                 confidence = 0.58
@@ -2446,29 +2454,6 @@ class FactChecker:
                 "Найден источник, который подтверждает утверждение: "
                 "совпадают ключевые сущности и смысл."
             )
-
-        elif partially_confirming_sources and not sensational:
-            if len(partially_confirming_sources) >= 2:
-                verdict = "ПРАВДА"
-                confidence = 0.55
-                reason = (
-                    "Два и более релевантных источника согласуются с "
-                    "утверждением по ключевым сущностям; противоречий нет."
-                )
-            elif relevant_sources:
-                verdict = "ПРАВДА"
-                confidence = 0.52
-                reason = (
-                    "Релевантный источник согласуется с утверждением по "
-                    "ключевым сущностям; противоречий нет."
-                )
-            else:
-                verdict = "НЕИЗВЕСТНО"
-                confidence = 0.48
-                reason = (
-                    "Источники лишь отчасти касаются темы утверждения, "
-                    "уверенного вывода сделать нельзя."
-                )
 
         elif sensational:
             verdict = "НЕИЗВЕСТНО"

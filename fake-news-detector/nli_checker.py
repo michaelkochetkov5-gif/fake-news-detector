@@ -15,6 +15,7 @@ VERDICT_BIG_DOUBTS = "БОЛЬШИЕ СОМНЕНИЯ"
 NLI_MODEL_NAME = "cross-encoder/nli-deberta-v3-base"
 
 MIN_CONFIDENCE = 0.50
+FACT_SKIP_CONFIDENCE = 0.90
 
 SOURCE_MESSAGES = {
     "factchecker": (

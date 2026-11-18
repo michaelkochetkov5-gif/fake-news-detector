@@ -7,7 +7,7 @@ from main_code import FactChecker
 from nli_checker import (
     NLIChecker,
     combine,
-    is_confident,
+    FACT_SKIP_CONFIDENCE,
     SOURCE_MESSAGES,
 )
 from datetime import datetime
@@ -288,8 +288,9 @@ if check_button or "example" in st.session_state:
 
             flud_result = None
 
-            if not is_confident(
-                original_fact_result
+            if (
+                original_fact_result.get("confidence", 0.0)
+                < FACT_SKIP_CONFIDENCE
             ):
                 with st.spinner(
                     "🧠 FLUD сравнивает утверждение "

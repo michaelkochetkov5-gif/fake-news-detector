@@ -5,7 +5,7 @@ from main_code import FactChecker
 from nli_checker import (
     NLIChecker,
     combine,
-    is_confident,
+    FACT_SKIP_CONFIDENCE,
     SOURCE_MESSAGES,
 )
 
@@ -191,7 +191,7 @@ if st.button("Запустить тест"):
 
         flud_result = None
 
-        if not is_confident(fact_result):
+        if fact_result.get("confidence", 0.0) < FACT_SKIP_CONFIDENCE:
             flud_result = flud_checker.verify(
                 text,
                 fact_result,
