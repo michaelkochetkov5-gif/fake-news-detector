@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-import numeric_checker
+from main_code import claim_key_terms, lemma_tokens, select_terms
 
 VERDICT_TRUE = "ПРАВДА"
 VERDICT_FAKE = "ФЕЙК"
@@ -15,7 +15,13 @@ VERDICT_BIG_DOUBTS = "БОЛЬШИЕ СОМНЕНИЯ"
 NLI_MODEL_NAME = "cross-encoder/nli-deberta-v3-base"
 
 MIN_CONFIDENCE = 0.50
+FACT_MIN_CONFIDENCE = 0.60
+FACT_FAKE_MIN_CONFIDENCE = 0.80
 FACT_SKIP_CONFIDENCE = 0.90
+MIN_SHARED_TERMS = 3
+ENTAIL_COVERAGE_MIN = 0.60
+NONNUM_CONTRA_COVERAGE_MIN = 1.0
+MAX_PREMISES = 8
 
 SOURCE_MESSAGES = {
     "factchecker": (
@@ -52,6 +58,30 @@ SOURCE_MESSAGES = {
 }
 
 
+NUMBER_UNIT_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(\u00b0\s*[a-z\u0430-\u044f\u0451]|[a-z\u0430-\u044f\u0451%]+)")
+
+
+def _number_units(text: str) -> List[tuple]:
+    pairs = []
+    cleaned = text.lower().replace("\u00a0", " ").replace("*", "")
+    for match in NUMBER_UNIT_RE.finditer(cleaned):
+        value = match.group(1).replace(",", ".")
+        unit = re.sub(r"\s+", "", match.group(2)).replace("\u0441", "c")[:3]
+        if unit in ("\u0433", "\u0433\u0433"):
+            unit = "\u0433\u043e\u0434"
+        pairs.append((value, unit))
+    return pairs
+
+
+def _numbers_conflict(claim: str, text: str) -> bool:
+    text_pairs = _number_units(text)
+    for value, unit in _number_units(claim):
+        same_unit = [v for v, u in text_pairs if u == unit]
+        if same_unit and value not in same_unit:
+            return True
+    return False
+
+
 class NLIChecker:
     def __init__(
         self,
@@ -78,19 +108,27 @@ class NLIChecker:
     def load(self) -> bool:
         return self.available
 
+    def _shared_terms(self, claim: str, text: str) -> int:
+        selected = select_terms(claim_key_terms(claim))
+        lemmas = set(lemma_tokens(text))
+        return sum(1 for lem, _ in selected if lem in lemmas)
+
     def _extract_premises(
         self,
+        claim: str,
         fact_result: Dict[str, Any],
-    ) -> List[str]:
+    ) -> List[Dict[str, str]]:
+        needed = min(
+            MIN_SHARED_TERMS,
+            len(select_terms(claim_key_terms(claim))),
+        )
         premises = []
 
         for detail in fact_result.get("details", []):
-            reason = str(
-                detail.get("reason", "")
-            ).strip()
-            source = str(
-                detail.get("source", "")
-            ).strip()
+            reason = str(detail.get("reason", "")).strip()
+            source = str(detail.get("source", "")).strip()
+            links = detail.get("links") or []
+            source_key = str(links[0]) if links else (source or reason[:80])
 
             if not reason and not source:
                 continue
@@ -99,25 +137,19 @@ class NLIChecker:
                 r'["«]([^"»]{10,1000})["»]',
                 reason,
             )
+            candidates = quotes[:3] if quotes else [
+                text for text in (reason, source) if text
+            ]
 
-            if quotes:
-                premises.extend(quotes[:3])
-            else:
-                if reason:
-                    premises.append(reason)
+            for text in candidates:
+                text = text.strip()
+                if len(text) < 10:
+                    continue
+                if self._shared_terms(claim, text) < needed:
+                    continue
+                premises.append({"text": text, "source": source_key})
 
-                if source and source not in premises:
-                    premises.append(source)
-
-        cleaned_premises = []
-
-        for premise in premises:
-            premise = premise.strip()
-
-            if len(premise) >= 10:
-                cleaned_premises.append(premise)
-
-        return cleaned_premises[:3]
+        return premises[:MAX_PREMISES]
 
     def verify(
         self,
@@ -128,36 +160,33 @@ class NLIChecker:
             return {
                 "verdict": VERDICT_UNKNOWN,
                 "confidence": 0.0,
-                "reason": (
-                    f"FLUD недоступна: {self.load_error}"
-                ),
+                "reason": f"FLUD недоступна: {self.load_error}",
                 "details": [],
                 "raw_response": "",
                 "decision_source": "nli_unavailable",
             }
 
-        premises = self._extract_premises(fact_result)
+        premises = self._extract_premises(claim, fact_result)
 
         if not premises:
             return {
                 "verdict": VERDICT_UNKNOWN,
                 "confidence": 0.0,
                 "reason": (
-                    "FLUD не нашла подходящих цитат "
-                    "из источников."
+                    "FLUD не нашла цитат, в которых совпадают "
+                    "не меньше трёх ключевых терминов утверждения."
                 ),
                 "details": [],
                 "raw_response": "",
                 "decision_source": "nli_no_premise",
             }
 
-        inputs = [
-            (premise, claim)
-            for premise in premises
-        ]
-
         try:
-            scores = self.model.predict(inputs)
+            scores = self.model.predict(
+                [(p["text"], claim) for p in premises],
+                batch_size=1,
+                show_progress_bar=False,
+            )
         except Exception as exc:
             return {
                 "verdict": VERDICT_UNKNOWN,
@@ -172,98 +201,81 @@ class NLIChecker:
             }
 
         scores = np.asarray(scores)
-
         exp_scores = np.exp(
-            scores
-            - scores.max(
-                axis=-1,
-                keepdims=True,
+            scores - scores.max(axis=-1, keepdims=True)
+        )
+        probabilities = exp_scores / exp_scores.sum(
+            axis=-1, keepdims=True
+        )
+        raw = str(probabilities.tolist())
+
+        n_terms = max(1, len(select_terms(claim_key_terms(claim))))
+        by_source: Dict[str, Dict[str, float]] = {}
+        for premise, row in zip(premises, probabilities):
+            entry = by_source.setdefault(
+                premise["source"], {"contra": 0.0, "entail": 0.0}
             )
+            coverage = self._shared_terms(claim, premise["text"]) / n_terms
+            if _numbers_conflict(claim, premise["text"]) or (
+                NONNUM_CONTRA_COVERAGE_MIN
+                and coverage >= NONNUM_CONTRA_COVERAGE_MIN
+            ):
+                entry["contra"] = max(entry["contra"], float(row[0]))
+            if coverage >= ENTAIL_COVERAGE_MIN:
+                entry["entail"] = max(entry["entail"], float(row[1]))
+
+        supporting = sorted(
+            (e["entail"] for e in by_source.values()
+             if e["entail"] >= MIN_CONFIDENCE),
+            reverse=True,
+        )
+        contradicting = sorted(
+            (e["contra"] for e in by_source.values()
+             if e["contra"] >= MIN_CONFIDENCE),
+            reverse=True,
         )
 
-        probabilities = (
-            exp_scores
-            / exp_scores.sum(
-                axis=-1,
-                keepdims=True,
-            )
-        )
-
-        contradiction_score = 0.0
-        entailment_score = 0.0
-        best_premise = ""
-
-        for premise, probability in zip(
-            premises,
-            probabilities,
-        ):
-            contradiction = float(probability[0])
-            entailment = float(probability[1])
-
-            if contradiction > contradiction_score:
-                contradiction_score = contradiction
-                best_premise = premise
-
-            if entailment > entailment_score:
-                entailment_score = entailment
-
-        if contradiction_score >= entailment_score:
-            verdict = VERDICT_FAKE
-            confidence = contradiction_score
-        else:
-            verdict = VERDICT_TRUE
-            confidence = entailment_score
-
-        numeric_result = numeric_checker.check_numbers(
-            claim,
-            best_premise,
-        )
-
-        adjusted = (
-            numeric_checker.adjust_nli_confidence(
-                contradiction_score,
-                numeric_result["features"],
-            )
-        )
-
-        adjusted_contradiction = adjusted[
-            "p_contradiction"
-        ]
-
-        if (
-            adjusted["changed"]
-            and adjusted_contradiction > entailment_score
-        ):
-            verdict = VERDICT_FAKE
-            confidence = adjusted_contradiction
-
-        if confidence < MIN_CONFIDENCE:
+        if len(supporting) >= 2 and len(supporting) > len(contradicting):
             return {
-                "verdict": VERDICT_UNKNOWN,
-                "confidence": confidence,
+                "verdict": VERDICT_TRUE,
+                "confidence": supporting[1],
                 "reason": (
-                    "FLUD недостаточно уверена в вердикте."
+                    "Минимум два независимых источника согласуются "
+                    "с утверждением."
                 ),
                 "details": [],
-                "raw_response": str(
-                    probabilities.tolist()
-                ),
-                "decision_source": "nli_uncertain",
+                "raw_response": raw,
+                "decision_source": "nli",
             }
 
+        if len(contradicting) >= 2 and len(contradicting) > len(supporting):
+            return {
+                "verdict": VERDICT_FAKE,
+                "confidence": contradicting[1],
+                "reason": (
+                    "Минимум два независимых источника противоречат "
+                    "утверждению."
+                ),
+                "details": [],
+                "raw_response": raw,
+                "decision_source": "nli",
+            }
+
+        all_values = [
+            value
+            for e in by_source.values()
+            for value in (e["contra"], e["entail"])
+        ]
         return {
-            "verdict": verdict,
-            "confidence": confidence,
+            "verdict": VERDICT_UNKNOWN,
+            "confidence": max(all_values),
             "reason": (
-                "FLUD сравнила утверждение с найденным "
-                "источником; numeric checker проверил "
-                "числовые совпадения."
+                "FLUD не нашла подтверждения от двух независимых "
+                "источников ни в одну сторону."
             ),
             "details": [],
-            "raw_response": str(
-                probabilities.tolist()
-            ),
-            "decision_source": "nli",
+            "raw_response": raw,
+            "decision_source": "nli_uncertain",
         }
 
     def check_fact(
@@ -348,8 +360,12 @@ def combine(
         flud_result.get("confidence", 0.0)
     )
 
-    fact_is_confident = is_confident(
-        fact_result
+    fact_is_confident = (
+        fact_verdict == VERDICT_TRUE
+        and fact_confidence >= FACT_MIN_CONFIDENCE
+    ) or (
+        fact_verdict == VERDICT_FAKE
+        and fact_confidence >= FACT_FAKE_MIN_CONFIDENCE
     )
     flud_is_confident = (
         flud_verdict in (
