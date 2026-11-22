@@ -1,4 +1,3 @@
-import streamlit as st
 import requests
 import feedparser
 import re
@@ -15,11 +14,16 @@ try:
 except ImportError:
     from duckduckgo_search import DDGS
 
-try:
-    from transformers import pipeline
-    TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    TRANSFORMERS_AVAILABLE = False
+# Таймаут обязателен: без него запрос к поисковику может висеть минутами
+# и блокировать всю проверку.
+DDGS_TIMEOUT = 15
+
+
+def _ddgs_client():
+    try:
+        return DDGS(timeout=DDGS_TIMEOUT)
+    except TypeError:
+        return DDGS()
 
 try:
     import pymorphy3
@@ -60,6 +64,15 @@ news_cache = cache.get("news_cache", {})
 
 
 def save_cache():
+    now = time.time()
+    for store in (search_cache, news_cache):
+        for key in [
+            key for key, entry in store.items()
+            if isinstance(entry, dict)
+            and now - entry.get("time", 0) > CACHE_TTL
+        ]:
+            store.pop(key, None)
+
     try:
         with open(CACHE_FILE, "w", encoding="utf-8") as file:
             json.dump(
@@ -68,8 +81,7 @@ def save_cache():
                     "news_cache": news_cache
                 },
                 file,
-                ensure_ascii=False,
-                indent=2
+                ensure_ascii=False
             )
     except Exception:
         pass
@@ -913,7 +925,7 @@ def search_duckduckgo(claim, max_results=6):
     queries = make_search_queries(claim)
 
     try:
-        with DDGS() as ddgs:
+        with _ddgs_client() as ddgs:
             for query in queries:
                 try:
                     web_results = ddgs.text(
@@ -1025,8 +1037,6 @@ def _wiki_get(params, timeout=15, max_retries=2):
 
 def get_wikipedia_full_text(title):
     try:
-        api_url = "https://ru.wikipedia.org/w/api.php"
-
         params = {
             "action": "query",
             "format": "json",
@@ -1089,8 +1099,6 @@ def search_wikipedia_api(claim, max_results=6):
 
     for query in queries:
         try:
-            api_url = "https://ru.wikipedia.org/w/api.php"
-
             params = {
                 "action": "query",
                 "format": "json",

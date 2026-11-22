@@ -5,6 +5,7 @@ scipy
 pandas
 pymorphy3
 duckduckgo-search
+ddgs
 feedparser
 requests
 beautifulsoup4

@@ -6,3 +6,4 @@ cache.json
 .env
 .DS_Store
 *.bak
+factchecker_cache.json
