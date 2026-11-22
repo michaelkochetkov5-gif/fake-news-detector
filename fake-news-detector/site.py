@@ -7,6 +7,7 @@ from main_code import FactChecker
 from nli_checker import (
     NLIChecker,
     combine,
+    verify_claims,
     FACT_SKIP_CONFIDENCE,
     LOGIC_VERSION,
     SOURCE_MESSAGES,
@@ -283,14 +284,13 @@ if check_button or pending_example:
                 < FACT_SKIP_CONFIDENCE
             ):
                 with st.spinner(
-                    "🧠 FLUD сравнивает утверждение "
+                    "🧠 FLUD сравнивает утверждения "
                     "с источниками..."
                 ):
-                    flud_result = (
-                        flud_checker.verify(
-                            text_to_check,
-                            original_fact_result,
-                        )
+                    flud_result = verify_claims(
+                        flud_checker,
+                        text_to_check,
+                        original_fact_result,
                     )
 
             fact_result = combine(
