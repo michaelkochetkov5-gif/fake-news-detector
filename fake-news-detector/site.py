@@ -8,6 +8,7 @@ from nli_checker import (
     NLIChecker,
     combine,
     FACT_SKIP_CONFIDENCE,
+    LOGIC_VERSION,
     SOURCE_MESSAGES,
 )
 from datetime import datetime
@@ -35,7 +36,7 @@ def save_cache(cache):
 
 def get_cache_key(text):
     return hashlib.md5(
-        ("flud-nli-numeric-v2|" + text).encode("utf-8")
+        (LOGIC_VERSION + "|" + text).encode("utf-8")
     ).hexdigest()
 
 # ===== FLUD: NLI + NUMERIC CHECKER =====
@@ -123,11 +124,10 @@ with st.sidebar:
             ),
             1,
         ):
-            verdict_icon = (
-                "❌"
-                if item["fact_verdict"] == "ФЕЙК"
-                else "✅"
-            )
+            verdict_icon = {
+                "ФЕЙК": "❌",
+                "ПРАВДА": "✅",
+            }.get(item["fact_verdict"], "⚠️")
 
             short_text = (
                 item["text"][:30] + "..."
@@ -137,15 +137,11 @@ with st.sidebar:
 
             if st.button(
                 f"{verdict_icon} {short_text}",
-                key=f"history_{i}",
+                key=f"history_{i}_{abs(hash(item['text'])) % 10000}",
             ):
                 st.session_state[
                     "load_history"
                 ] = item
-
-        st.session_state[
-            "load_history"
-        ] = None
     else:
         st.write("Пока нет проверок")
 
@@ -218,7 +214,6 @@ if examples_button:
 if st.session_state.get("load_history"):
     item = st.session_state["load_history"]
 
-    st.session_state["example"] = item["text"]
     st.session_state[
         "fact_result"
     ] = item["fact_result"]
@@ -237,15 +232,10 @@ if st.session_state.get("load_history"):
 
     st.rerun()
 
-if check_button or "example" in st.session_state:
-    text_to_check = (
-        st.session_state.get(
-            "example",
-            user_input,
-        )
-        if "example" in st.session_state
-        else user_input
-    )
+pending_example = st.session_state.pop("example", None)
+
+if check_button or pending_example:
+    text_to_check = pending_example or user_input
 
     if text_to_check.strip() == "":
         st.warning(
@@ -437,7 +427,7 @@ if check_button or "example" in st.session_state:
         )
 
         # ===== FLUD =====
-        if flud_result:
+        if flud_result is not None:
             with st.expander(
                 "🧠 Результат FLUD"
             ):
@@ -526,7 +516,7 @@ if check_button or "example" in st.session_state:
             st.download_button(
                 label="📥 Скачать список ссылок",
                 data="\n".join(
-                    seen_links
+                    sorted(seen_links)
                 ),
                 file_name="sources.txt",
                 mime="text/plain",
@@ -545,7 +535,7 @@ if check_button or "example" in st.session_state:
                 ):
                     icon = (
                         "✅"
-                        if detail["result"] is True
+                        if detail.get("result") is True
                         else "❌"
                         if detail["result"] is False
                         else "⚠️"
@@ -553,14 +543,14 @@ if check_button or "example" in st.session_state:
 
                     st.write(
                         f"{icon} "
-                        f"**{detail['fact']}**"
+                        f"**{detail.get('fact', '')}**"
                     )
                     st.write(
                         f"   *Источник:* "
-                        f"{detail['source']}"
+                        f"{detail.get('source', '')}"
                     )
                     st.write(
-                        f"   *{detail['reason']}*"
+                        f"   *{detail.get('reason', '')}*"
                     )
 
                     links = detail.get(
@@ -578,7 +568,7 @@ if check_button or "example" in st.session_state:
                                 f"   - "
                                 f"[{link}]({link}) "
                                 f"*( "
-                                f"{detail['reason']} )*"
+                                f"{detail.get('reason', '')} )*"
                             )
 
                     st.divider()
